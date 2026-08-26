@@ -181,7 +181,13 @@ class PasskeyProviderGetRequest(
         }
 
         val r = assertionResponseJson(
-            clientDataJson = PasskeyBase64.encodeToString(clientDataJsonBytes),
+            // 受信浏览器会提供它自己生成的 clientDataHash。此时必须省略本地拼装的
+            // clientDataJSON，让 Credential Manager 把浏览器原始值补回响应；否则签名
+            // 使用浏览器哈希、服务端却对本地 JSON 重算哈希，认证一定失败。
+            clientDataJson = assertionClientDataJsonForResponse(
+                clientDataJsonBytes = clientDataJsonBytes,
+                clientDataHash = opt.clientDataHash,
+            ),
             authenticatorData = PasskeyBase64.encodeToString(defaultAuthenticatorData),
             signature = encodedSignature,
             userHandle = credential.userHandle,
@@ -335,17 +341,27 @@ private fun storedPasskeyKeyEncodingError() = GetPublicKeyCredentialDomException
 )
 
 internal fun assertionResponseJson(
-    clientDataJson: String,
+    clientDataJson: String?,
     authenticatorData: String,
     signature: String,
     userHandle: String?,
 ): JsonObject = buildJsonObject {
-    put("clientDataJSON", clientDataJson)
+    clientDataJson?.let { put("clientDataJSON", it) }
     put("authenticatorData", authenticatorData)
     put("signature", signature)
     userHandle
         ?.takeIf { it.isNotEmpty() }
         ?.let { put("userHandle", it) }
+}
+
+internal fun assertionClientDataJsonForResponse(
+    clientDataJsonBytes: ByteArray,
+    clientDataHash: ByteArray?,
+    encode: (ByteArray) -> String = PasskeyBase64::encodeToString,
+): String? = if (clientDataHash == null) {
+    encode(clientDataJsonBytes)
+} else {
+    null
 }
 
 internal fun requireCredentialRpIdMatchesRequest(

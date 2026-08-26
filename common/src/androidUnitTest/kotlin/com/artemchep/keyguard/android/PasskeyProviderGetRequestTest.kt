@@ -8,11 +8,14 @@ import com.artemchep.keyguard.common.service.webauthn.PasskeyCredentialId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.Base64
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.time.Instant
@@ -23,6 +26,44 @@ import kotlin.time.Instant
  * discoverable-credential fallback.
  */
 class PasskeyProviderGetRequestTest {
+    @Test
+    fun `受信浏览器提供 clientDataHash 时认证响应省略本地 clientDataJSON`() {
+        val clientDataJson = assertionClientDataJsonForResponse(
+            clientDataJsonBytes = "local-client-data".encodeToByteArray(),
+            clientDataHash = ByteArray(32),
+            encode = { error("不应编码本地 clientDataJSON") },
+        )
+        val response = assertionResponseJson(
+            clientDataJson = clientDataJson,
+            authenticatorData = "authenticator-data",
+            signature = "signature",
+            userHandle = "user-handle",
+        )
+
+        assertFalse("clientDataJSON" in response)
+        assertEquals("authenticator-data", response.getValue("authenticatorData").jsonPrimitive.content)
+        assertEquals("signature", response.getValue("signature").jsonPrimitive.content)
+        assertEquals("user-handle", response.getValue("userHandle").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `原生调用认证响应保留本地 clientDataJSON`() {
+        val clientDataJson = assertionClientDataJsonForResponse(
+            clientDataJsonBytes = "client-data".encodeToByteArray(),
+            clientDataHash = null,
+            encode = ByteArray::decodeToString,
+        )
+        val response = assertionResponseJson(
+            clientDataJson = clientDataJson,
+            authenticatorData = "authenticator-data",
+            signature = "signature",
+            userHandle = null,
+        )
+
+        assertEquals("client-data", response.getValue("clientDataJSON").jsonPrimitive.content)
+        assertFalse("userHandle" in response)
+    }
+
     // Spec coverage: Sections 5.1.4.2 and 6.3.3 bind
     // authenticatorGetAssertion to exactly one request RP ID. Section 6.1
     // defines rpIdHash inside authenticator data; Section 6.3.3 signs
