@@ -364,6 +364,8 @@ data class DSecret(
             val keyAlgorithm: String, // ECDSA
             val keyCurve: String, // P-256
             val keyValue: String,
+            /** Base64 编码的独立 PRF 密钥；旧凭据没有该字段。 */
+            val prfSecret: String? = null,
             val rpId: String,
             val rpName: String?,
             val counter: Int?,

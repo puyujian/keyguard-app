@@ -30,6 +30,9 @@ class PasskeyUtils(
     httpClient: HttpClient,
 ) {
     companion object {
+        // WebAuthn PRF 规定的上下文标签，末尾必须包含一个零字节。
+        internal val PRF_LABEL = "WebAuthn PRF\u0000".toByteArray(Charsets.UTF_8)
+
         /**
          * The minimum time the 'passkey is doing work' screen should
          * be shown. This is needed just to make to user interface less
@@ -197,6 +200,19 @@ class PasskeyUtils(
 
     fun generateCredentialId(): String = cryptoService.uuid()
 
+    /** 为新凭据生成独立且不可预测的 32 字节 PRF 密钥。 */
+    fun generatePrfSecret(): ByteArray = cryptoService.seed(32)
+
+    /** 使用该凭据独立保存的密钥计算 WebAuthn PRF 输出。 */
+    fun computePrf(
+        prfSecretBytes: ByteArray,
+        prfInput: ByteArray,
+    ): ByteArray = computeWebAuthnPrf(
+        cryptoService = cryptoService,
+        prfSecretBytes = prfSecretBytes,
+        prfInput = prfInput,
+    )
+
     fun userVerification(
         mode: String?,
         userVerified: Boolean,
@@ -225,4 +241,20 @@ class PasskeyUtils(
 
     private fun getGenericServiceFailureMessage(rpId: String): String =
         "This seems to be an issue with the service provider `$rpId`. Please reach out to their support team."
+}
+
+/**
+ * 软件认证器中的 PRF 计算：先对带上下文标签的输入做 SHA-256，
+ * 再以凭据独立保存的随机密钥执行 HMAC-SHA-256。
+ */
+internal fun computeWebAuthnPrf(
+    cryptoService: CryptoGenerator,
+    prfSecretBytes: ByteArray,
+    prfInput: ByteArray,
+): ByteArray {
+    val prfSalt = cryptoService.hashSha256(PasskeyUtils.PRF_LABEL + prfInput)
+    return cryptoService.hmacSha256(
+        key = prfSecretBytes,
+        data = prfSalt,
+    )
 }

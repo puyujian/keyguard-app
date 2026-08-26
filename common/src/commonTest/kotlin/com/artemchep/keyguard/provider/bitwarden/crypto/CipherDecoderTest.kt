@@ -59,6 +59,7 @@ class CipherDecoderTest {
                       "KeyAlgorithm": "ECDSA",
                       "KeyCurve": "P-256",
                       "KeyValue": "key-value",
+                      "PrfSecret": "encrypted-prf-secret",
                       "RpId": "example.com",
                       "RpName": "Example",
                       "Counter": "1",
@@ -108,6 +109,7 @@ class CipherDecoderTest {
             login.uris.single(),
         )
         assertEquals("credential-id", login.fido2Credentials.single().credentialId)
+        assertEquals("encrypted-prf-secret", login.fido2Credentials.single().prfSecret)
         assertEquals("example.com", login.fido2Credentials.single().rpId)
         assertEquals(Instant.parse("2024-01-03T00:00:00Z"), login.fido2Credentials.single().creationDate)
     }

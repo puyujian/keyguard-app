@@ -27,6 +27,7 @@ import com.artemchep.keyguard.common.service.webauthn.WebAuthnEncodingException
 import com.artemchep.keyguard.common.service.webauthn.WebAuthnNotAllowedException
 import com.artemchep.keyguard.common.service.webauthn.requireCredentialAllowedByRequestOptions as requireWebAuthnCredentialAllowedByRequestOptions
 import com.artemchep.keyguard.common.service.webauthn.requireCredentialRpIdMatchesRequest as requireWebAuthnCredentialRpIdMatchesRequest
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -155,6 +156,30 @@ class PasskeyProviderGetRequest(
             signature.fill(0)
         }
 
+        val prfEvalInput = resolvePasskeyPrfEvalInput(
+            requestJson = opt.requestJson,
+            credentialIdBytes = credentialIdBytes,
+            json = json,
+        )
+        val prfSecretBytes = if (userVerified) {
+            decodeStoredPrfSecretOrNull(
+                encoded = credential.prfSecret,
+                decode = base64Service::decodeOrNull,
+            )
+        } else {
+            null
+        }
+        val prfExtensionResult = try {
+            createGetPasskeyPrfExtensionResult(
+                evalInput = prfEvalInput,
+                userVerified = userVerified,
+                prfSecretBytes = prfSecretBytes,
+                computePrf = passkeyUtils::computePrf,
+            )
+        } finally {
+            prfSecretBytes?.fill(0)
+        }
+
         val r = assertionResponseJson(
             clientDataJson = PasskeyBase64.encodeToString(clientDataJsonBytes),
             authenticatorData = PasskeyBase64.encodeToString(defaultAuthenticatorData),
@@ -167,7 +192,9 @@ class PasskeyProviderGetRequest(
             put("type", "public-key")
             put("authenticatorAttachment", "cross-platform")
             put("response", r)
-            put("clientExtensionResults", buildJsonObject { })
+            put("clientExtensionResults", buildJsonObject {
+                prfExtensionResult?.let { put("prf", it) }
+            })
         }
         val authenticationResponseJson = json.encodeToString(authenticationResponse)
         val passkeyCredential = PublicKeyCredential(authenticationResponseJson)
@@ -207,6 +234,99 @@ class PasskeyProviderGetRequest(
     private fun JsonObjectBuilder.put(key: String, data: ByteArray) {
         put(key, PasskeyBase64.encodeToString(data))
     }
+}
+
+// https://www.w3.org/TR/webauthn-3/#prf-extension
+@Serializable
+internal data class GetPasskeyPrfRequestOptions(
+    val extensions: GetPasskeyExtensions? = null,
+)
+
+@Serializable
+internal data class GetPasskeyExtensions(
+    val prf: GetPasskeyPrfExtension? = null,
+)
+
+@Serializable
+internal data class GetPasskeyPrfExtension(
+    val eval: GetPasskeyPrfEvalInput? = null,
+    val evalByCredential: Map<String, GetPasskeyPrfEvalInput> = emptyMap(),
+)
+
+@Serializable
+internal data class GetPasskeyPrfEvalInput(
+    val first: String,
+    val second: String? = null,
+)
+
+/** 优先选择当前 credentialId 对应的 evalByCredential 输入，再回退到通用 eval。 */
+internal fun resolvePasskeyPrfEvalInput(
+    requestJson: String,
+    credentialIdBytes: ByteArray,
+    json: Json,
+    encodeCredentialId: (ByteArray) -> String = PasskeyBase64::encodeToString,
+): GetPasskeyPrfEvalInput? {
+    val options = runCatching {
+        json.decodeFromString<GetPasskeyPrfRequestOptions>(requestJson)
+    }.getOrNull()
+    val prf = options?.extensions?.prf ?: return null
+    val credentialId = encodeCredentialId(credentialIdBytes)
+    return prf.evalByCredential[credentialId] ?: prf.eval
+}
+
+/**
+ * 构造认证响应的 PRF 对象。请求存在但凭据是旧数据或未完成用户验证时，
+ * 返回空对象，普通通行密钥签名仍然保持成功。
+ */
+internal fun createGetPasskeyPrfExtensionResult(
+    evalInput: GetPasskeyPrfEvalInput?,
+    userVerified: Boolean,
+    prfSecretBytes: ByteArray?,
+    computePrf: (prfSecretBytes: ByteArray, prfInput: ByteArray) -> ByteArray,
+    decodeInput: (String) -> ByteArray = PasskeyBase64::decode,
+    encodeOutput: (ByteArray) -> String = PasskeyBase64::encodeToString,
+): JsonObject? {
+    evalInput ?: return null
+    return buildJsonObject {
+        if (userVerified && prfSecretBytes != null) {
+            put("results", buildJsonObject {
+                put(
+                    "first",
+                    computeAndEncodePasskeyPrf(
+                        prfSecretBytes = prfSecretBytes,
+                        prfInputBase64 = evalInput.first,
+                        computePrf = computePrf,
+                        decodeInput = decodeInput,
+                        encodeOutput = encodeOutput,
+                    ),
+                )
+                evalInput.second?.let { second ->
+                    put(
+                        "second",
+                        computeAndEncodePasskeyPrf(
+                            prfSecretBytes = prfSecretBytes,
+                            prfInputBase64 = second,
+                            computePrf = computePrf,
+                            decodeInput = decodeInput,
+                            encodeOutput = encodeOutput,
+                        ),
+                    )
+                }
+            })
+        }
+    }
+}
+
+internal fun decodeStoredPrfSecretOrNull(
+    encoded: String?,
+    decode: (String) -> ByteArray?,
+): ByteArray? {
+    val decoded = encoded?.let(decode) ?: return null
+    if (decoded.size == 32) {
+        return decoded
+    }
+    decoded.fill(0)
+    return null
 }
 
 private fun storedPasskeyKeyEncodingError() = GetPublicKeyCredentialDomException(

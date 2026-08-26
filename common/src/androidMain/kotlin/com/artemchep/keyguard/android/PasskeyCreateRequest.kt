@@ -24,6 +24,7 @@ import com.artemchep.keyguard.common.service.crypto.PasskeyCrypto
 import com.artemchep.keyguard.common.service.crypto.PasskeyPublicKey
 import com.artemchep.keyguard.common.service.crypto.PasskeySignatureAlgorithm
 import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskey
+import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskeyPrfExtension
 import com.artemchep.keyguard.common.service.text.Base64Service
 import com.artemchep.keyguard.common.service.webauthn.PasskeyBase64
 import com.artemchep.keyguard.common.service.webauthn.PasskeyCredentialId
@@ -36,6 +37,7 @@ import com.artemchep.keyguard.common.service.webauthn.pubKeyCredParamsOrDefaults
 import com.artemchep.keyguard.common.service.webauthn.requireNoExcludedPasskeyCredential as requireNoWebAuthnExcludedPasskeyCredential
 import com.artemchep.keyguard.common.service.webauthn.webAuthnNoneAttestationObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -247,12 +249,27 @@ class PasskeyCreateRequest(
         val discoverable = data.authenticatorSelection.requireResidentKey ||
                 data.authenticatorSelection.residentKey == "required" ||
                 data.authenticatorSelection.residentKey == "preferred"
+        val prfSecretBytes = passkeyUtils.generatePrfSecret()
+        val prfSecret: String
+        val prfExtensionResult: JsonObject?
+        try {
+            prfSecret = base64Service.encodeToString(prfSecretBytes)
+            prfExtensionResult = createPasskeyPrfExtensionResult(
+                extension = data.extensions?.prf,
+                userVerified = userVerified,
+                prfSecretBytes = prfSecretBytes,
+                computePrf = passkeyUtils::computePrf,
+            )
+        } finally {
+            prfSecretBytes.fill(0)
+        }
         val local = AddCredentialCipherRequestPasskeyData(
             credentialId = credentialId,
             keyType = "public-key",
             keyAlgorithm = profile.keyAlgorithm,
             keyCurve = profile.keyCurve,
             keyValue = keyValue,
+            prfSecret = prfSecret,
             rpId = rpId,
             rpName = rpName,
             counter = 0,
@@ -290,7 +307,9 @@ class PasskeyCreateRequest(
                     put("authenticatorData", authData)
                 },
             )
-            put("clientExtensionResults", buildJsonObject { })
+            put("clientExtensionResults", buildJsonObject {
+                prfExtensionResult?.let { put("prf", it) }
+            })
         }
         val registrationResponseJson = json.encodeToString(registrationResponse)
         return CreatePublicKeyCredentialResponse(registrationResponseJson) to local
@@ -309,6 +328,68 @@ class PasskeyCreateRequest(
 
     private fun JsonObjectBuilder.put(key: String, data: ByteArray) {
         put(key, PasskeyBase64.encodeToString(data))
+    }
+}
+
+/** 构造注册响应中的 PRF 扩展结果；只有完成用户验证时才返回 eval 输出。 */
+internal fun createPasskeyPrfExtensionResult(
+    extension: CreatePasskeyPrfExtension?,
+    userVerified: Boolean,
+    prfSecretBytes: ByteArray,
+    computePrf: (prfSecretBytes: ByteArray, prfInput: ByteArray) -> ByteArray,
+    decodeInput: (String) -> ByteArray = PasskeyBase64::decode,
+    encodeOutput: (ByteArray) -> String = PasskeyBase64::encodeToString,
+): JsonObject? {
+    extension ?: return null
+    return buildJsonObject {
+        put("enabled", true)
+        val eval = extension.eval
+        if (eval != null && userVerified) {
+            put("results", buildJsonObject {
+                put(
+                    "first",
+                    computeAndEncodePasskeyPrf(
+                        prfSecretBytes = prfSecretBytes,
+                        prfInputBase64 = eval.first,
+                        computePrf = computePrf,
+                        decodeInput = decodeInput,
+                        encodeOutput = encodeOutput,
+                    ),
+                )
+                eval.second?.let { second ->
+                    put(
+                        "second",
+                        computeAndEncodePasskeyPrf(
+                            prfSecretBytes = prfSecretBytes,
+                            prfInputBase64 = second,
+                            computePrf = computePrf,
+                            decodeInput = decodeInput,
+                            encodeOutput = encodeOutput,
+                        ),
+                    )
+                }
+            })
+        }
+    }
+}
+
+internal fun computeAndEncodePasskeyPrf(
+    prfSecretBytes: ByteArray,
+    prfInputBase64: String,
+    computePrf: (prfSecretBytes: ByteArray, prfInput: ByteArray) -> ByteArray,
+    decodeInput: (String) -> ByteArray,
+    encodeOutput: (ByteArray) -> String,
+): String {
+    val input = decodeInput(prfInputBase64)
+    val output = try {
+        computePrf(prfSecretBytes, input)
+    } finally {
+        input.fill(0)
+    }
+    return try {
+        encodeOutput(output)
+    } finally {
+        output.fill(0)
     }
 }
 
