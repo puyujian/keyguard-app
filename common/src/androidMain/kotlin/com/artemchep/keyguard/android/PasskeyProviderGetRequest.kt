@@ -171,10 +171,14 @@ class PasskeyProviderGetRequest(
         }
         val prfExtensionResult = try {
             createGetPasskeyPrfExtensionResult(
-                evalInput = prfEvalInput,
+                evalInput = prfEvalInput?.evalInput,
                 userVerified = userVerified,
                 prfSecretBytes = prfSecretBytes,
-                computePrf = passkeyUtils::computePrf,
+                computePrf = if (prfEvalInput?.alreadyHashed == true) {
+                    passkeyUtils::computePrfFromHashedInput
+                } else {
+                    passkeyUtils::computePrf
+                },
             )
         } finally {
             prfSecretBytes?.fill(0)
@@ -251,6 +255,9 @@ internal data class GetPasskeyPrfRequestOptions(
 @Serializable
 internal data class GetPasskeyExtensions(
     val prf: GetPasskeyPrfExtension? = null,
+    // Android 的二维码 Hybrid 通道无法还原已经在 PC 端哈希的 PRF 输入，
+    // 因此会以同样结构的合成扩展交给手机上的凭据提供方。
+    val prfAlreadyHashed: GetPasskeyPrfExtension? = null,
 )
 
 @Serializable
@@ -265,19 +272,34 @@ internal data class GetPasskeyPrfEvalInput(
     val second: String? = null,
 )
 
+internal data class ResolvedGetPasskeyPrfEvalInput(
+    val evalInput: GetPasskeyPrfEvalInput,
+    val alreadyHashed: Boolean,
+)
+
 /** 优先选择当前 credentialId 对应的 evalByCredential 输入，再回退到通用 eval。 */
 internal fun resolvePasskeyPrfEvalInput(
     requestJson: String,
     credentialIdBytes: ByteArray,
     json: Json,
     encodeCredentialId: (ByteArray) -> String = PasskeyBase64::encodeToString,
-): GetPasskeyPrfEvalInput? {
+): ResolvedGetPasskeyPrfEvalInput? {
     val options = runCatching {
         json.decodeFromString<GetPasskeyPrfRequestOptions>(requestJson)
     }.getOrNull()
-    val prf = options?.extensions?.prf ?: return null
+    val extensions = options?.extensions ?: return null
+    val (prf, alreadyHashed) = when {
+        extensions.prf != null && extensions.prfAlreadyHashed != null -> return null
+        extensions.prf != null -> extensions.prf to false
+        extensions.prfAlreadyHashed != null -> extensions.prfAlreadyHashed to true
+        else -> return null
+    }
     val credentialId = encodeCredentialId(credentialIdBytes)
-    return prf.evalByCredential[credentialId] ?: prf.eval
+    val evalInput = prf.evalByCredential[credentialId] ?: prf.eval ?: return null
+    return ResolvedGetPasskeyPrfEvalInput(
+        evalInput = evalInput,
+        alreadyHashed = alreadyHashed,
+    )
 }
 
 /**

@@ -213,6 +213,16 @@ class PasskeyUtils(
         prfInput = prfInput,
     )
 
+    /** Android 二维码 Hybrid 请求已在 PC 端完成 WebAuthn PRF 输入哈希，禁止再次哈希。 */
+    fun computePrfFromHashedInput(
+        prfSecretBytes: ByteArray,
+        hashedPrfInput: ByteArray,
+    ): ByteArray = computeWebAuthnPrfFromHashedInput(
+        cryptoService = cryptoService,
+        prfSecretBytes = prfSecretBytes,
+        hashedPrfInput = hashedPrfInput,
+    )
+
     fun userVerification(
         mode: String?,
         userVerified: Boolean,
@@ -256,5 +266,20 @@ internal fun computeWebAuthnPrf(
     return cryptoService.hmacSha256(
         key = prfSecretBytes,
         data = prfSalt,
+    )
+}
+
+/** 对 Hybrid 通道传入的 32 字节已哈希 PRF 输入直接执行凭据级 HMAC。 */
+internal fun computeWebAuthnPrfFromHashedInput(
+    cryptoService: CryptoGenerator,
+    prfSecretBytes: ByteArray,
+    hashedPrfInput: ByteArray,
+): ByteArray {
+    require(hashedPrfInput.size == 32) {
+        "Hybrid PRF input must be a 32-byte SHA-256 value."
+    }
+    return cryptoService.hmacSha256(
+        key = prfSecretBytes,
+        data = hashedPrfInput,
     )
 }

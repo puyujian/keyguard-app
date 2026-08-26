@@ -6,6 +6,7 @@ import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
 import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskeyPrfEvalInput
 import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskeyPrfExtension
 import java.security.MessageDigest
+import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.json.Json
@@ -85,6 +86,28 @@ class PasskeyPrfTest {
     }
 
     @Test
+    fun `二维码 Hybrid 已哈希输入不会被重复哈希`() {
+        val secret = ByteArray(32) { it.toByte() }
+        val rawInput = "passwordless-login".encodeToByteArray()
+        val hashedInput = MessageDigest.getInstance("SHA-256")
+            .digest(PasskeyUtils.PRF_LABEL + rawInput)
+
+        val regularOutput = computeWebAuthnPrf(cryptoGenerator, secret, rawInput)
+        val hybridOutput = computeWebAuthnPrfFromHashedInput(
+            cryptoService = cryptoGenerator,
+            prfSecretBytes = secret,
+            hashedPrfInput = hashedInput,
+        )
+
+        assertContentEquals(regularOutput, hybridOutput)
+        assertFalse(
+            hybridOutput.contentEquals(
+                computeWebAuthnPrf(cryptoGenerator, secret, hashedInput),
+            ),
+        )
+    }
+
+    @Test
     fun `创建响应声明 PRF 并返回单输入结果`() {
         val secret = ByteArray(32) { it.toByte() }
         val result = createPasskeyPrfExtensionResult(
@@ -159,8 +182,10 @@ class PasskeyPrfTest {
             encodeCredentialId = ByteArray::decodeToString,
         )
 
-        assertEquals("global-first", input?.first)
-        assertEquals("global-second", input?.second)
+        val resolvedInput = assertNotNull(input)
+        assertFalse(resolvedInput.alreadyHashed)
+        assertEquals("global-first", resolvedInput.evalInput.first)
+        assertEquals("global-second", resolvedInput.evalInput.second)
     }
 
     @Test
@@ -188,9 +213,64 @@ class PasskeyPrfTest {
             encodeCredentialId = ByteArray::decodeToString,
         )
 
-        assertEquals("input-a", first?.first)
-        assertEquals("input-b", second?.first)
-        assertEquals("input-b-2", second?.second)
+        assertEquals("input-a", first?.evalInput?.first)
+        assertEquals("input-b", second?.evalInput?.first)
+        assertEquals("input-b-2", second?.evalInput?.second)
+    }
+
+    @Test
+    fun `二维码 Hybrid 解析已哈希的 evalByCredential`() {
+        val credentialHash = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(ByteArray(32) { it.toByte() })
+        val rotationHash = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(ByteArray(32) { (it + 1).toByte() })
+        val requestJson =
+            """
+            {
+              "challenge":"YQ",
+              "rpId":"example.com",
+              "extensions":{
+                "prfAlreadyHashed":{
+                  "eval":{"first":"fallback-hash"},
+                  "evalByCredential":{
+                    "credential-a":{"first":"$credentialHash","second":"$rotationHash"}
+                  }
+                }
+              }
+            }
+            """.trimIndent()
+
+        val input = resolvePasskeyPrfEvalInput(
+            requestJson = requestJson,
+            credentialIdBytes = "credential-a".encodeToByteArray(),
+            json = json,
+            encodeCredentialId = ByteArray::decodeToString,
+        )
+
+        assertNotNull(input)
+        assertTrue(input.alreadyHashed)
+        assertEquals(credentialHash, input.evalInput.first)
+        assertEquals(rotationHash, input.evalInput.second)
+    }
+
+    @Test
+    fun `认证拒绝同时出现普通和已哈希 PRF 扩展`() {
+        val input = resolvePasskeyPrfEvalInput(
+            requestJson =
+                """
+                {
+                  "extensions":{
+                    "prf":{"eval":{"first":"raw"}},
+                    "prfAlreadyHashed":{"eval":{"first":"hashed"}}
+                  }
+                }
+                """.trimIndent(),
+            credentialIdBytes = "credential-a".encodeToByteArray(),
+            json = json,
+            encodeCredentialId = ByteArray::decodeToString,
+        )
+
+        assertNull(input)
     }
 
     @Test
