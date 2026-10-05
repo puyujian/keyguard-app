@@ -1,6 +1,7 @@
 package com.artemchep.keyguard.common.service.export.impl
 
 import com.artemchep.keyguard.common.model.DSecret
+import com.artemchep.keyguard.common.service.export.entity.ItemLoginFido2CredentialsExportEntity
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentFields
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadata
 import com.artemchep.keyguard.feature.home.vault.search.createSecret
@@ -12,6 +13,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.time.Instant
 
 class JsonExportServiceImplTest {
     private val json = Json
@@ -185,7 +188,53 @@ class JsonExportServiceImplTest {
         )
     }
 
-    private fun exportedFields(cipher: DSecret) = json
+    @Test
+    fun `exports independent PRF secret alongside private key and keeps legacy credential nullable`() {
+        val prfCredential = DSecret.Login.Fido2Credentials(
+            credentialId = "prf-credential",
+            keyType = "public-key",
+            keyAlgorithm = "ECDSA",
+            keyCurve = "P-256",
+            keyValue = "private-key",
+            prfSecret = "cHJmLXNlY3JldA==",
+            rpId = "example.com",
+            rpName = "Example",
+            counter = 0,
+            userHandle = "user-handle",
+            userName = "alice",
+            userDisplayName = "Alice",
+            discoverable = true,
+            creationDate = Instant.parse("2024-01-01T00:00:00Z"),
+        )
+        val legacyCredential = prfCredential.copy(
+            credentialId = "legacy-credential",
+            prfSecret = null,
+        )
+        val cipher = createSecret(id = "cipher").copy(
+            login = DSecret.Login(
+                fido2Credentials = listOf(prfCredential, legacyCredential),
+            ),
+        )
+        val credentials = exportedItem(cipher)
+            .getValue("login").jsonObject
+            .getValue("fido2Credentials").jsonArray
+
+        val prf = credentials[0].jsonObject
+        assertEquals(prfCredential.prfSecret, prf.getValue("prfSecret").jsonPrimitive.content)
+        assertEquals(prfCredential.keyValue, prf.getValue("keyValue").jsonPrimitive.content)
+        val legacy = credentials[1].jsonObject
+        assertNull(legacy["prfSecret"])
+        assertEquals(legacyCredential.keyValue, legacy.getValue("keyValue").jsonPrimitive.content)
+        val decodedLegacy = json.decodeFromJsonElement(
+            ItemLoginFido2CredentialsExportEntity.serializer(),
+            legacy,
+        )
+        assertNull(decodedLegacy.prfSecret)
+    }
+
+    private fun exportedFields(cipher: DSecret) = exportedItem(cipher).getValue("fields")
+
+    private fun exportedItem(cipher: DSecret) = json
         .parseToJsonElement(
             service.export(
                 organizations = emptyList(),
@@ -199,7 +248,6 @@ class JsonExportServiceImplTest {
         .jsonArray
         .single()
         .jsonObject
-        .getValue("fields")
 
     private fun JsonObject.toExportedField() = ExportedField(
         type = getValue("type").jsonPrimitive.content.toInt(),

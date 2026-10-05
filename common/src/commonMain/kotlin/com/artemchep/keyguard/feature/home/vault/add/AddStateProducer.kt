@@ -1601,12 +1601,13 @@ class AddStateItemPasskeyFactory(
     )
 
     @kotlinx.serialization.Serializable
-    private data class PasskeyData(
+    internal data class PasskeyData(
         val credentialId: String,
         val keyType: String, // public-key
         val keyAlgorithm: String, // ECDSA
         val keyCurve: String, // P-256
         val keyValue: String,
+        val prfSecret: String? = null,
         val rpId: String,
         val rpName: String?,
         val counter: Int?,
@@ -1615,15 +1616,14 @@ class AddStateItemPasskeyFactory(
         val userDisplayName: String? = null,
         val discoverable: Boolean,
         val creationDate: Instant,
-    )
-
-    private fun PasskeyData.toDomainOrNull(): DSecret.Login.Fido2Credentials? {
-        return DSecret.Login.Fido2Credentials(
+    ) {
+        fun toDomain(): DSecret.Login.Fido2Credentials = DSecret.Login.Fido2Credentials(
             credentialId = credentialId,
             keyType = keyType,
             keyAlgorithm = keyAlgorithm,
             keyCurve = keyCurve,
             keyValue = keyValue,
+            prfSecret = prfSecret,
             rpId = rpId,
             rpName = rpName,
             counter = counter,
@@ -1633,6 +1633,25 @@ class AddStateItemPasskeyFactory(
             discoverable = discoverable,
             creationDate = creationDate,
         )
+
+        companion object {
+            fun fromDomain(credential: DSecret.Login.Fido2Credentials) = PasskeyData(
+                credentialId = credential.credentialId,
+                keyType = credential.keyType,
+                keyAlgorithm = credential.keyAlgorithm,
+                keyCurve = credential.keyCurve,
+                keyValue = credential.keyValue,
+                prfSecret = credential.prfSecret,
+                rpId = credential.rpId,
+                rpName = credential.rpName,
+                counter = credential.counter,
+                userHandle = credential.userHandle,
+                userName = credential.userName,
+                userDisplayName = credential.userDisplayName,
+                discoverable = credential.discoverable,
+                creationDate = credential.creationDate,
+            )
+        }
     }
 
     override val type: String = "passkey"
@@ -1655,29 +1674,13 @@ class AddStateItemPasskeyFactory(
                 json.decodeFromString(m)
             },
         ) {
-            val data = initial?.let {
-                PasskeyData(
-                    credentialId = it.credentialId,
-                    keyType = it.keyType,
-                    keyAlgorithm = it.keyAlgorithm,
-                    keyCurve = it.keyCurve,
-                    keyValue = it.keyValue,
-                    rpId = it.rpId,
-                    rpName = it.rpName,
-                    counter = it.counter,
-                    userHandle = it.userHandle,
-                    userName = it.userName,
-                    userDisplayName = it.userDisplayName,
-                    discoverable = it.discoverable,
-                    creationDate = it.creationDate,
-                )
-            }
+            val data = initial?.let(PasskeyData::fromDomain)
             PasskeyHolder(data = data)
         }
 
         val stateFlow = dataSink
             .map { holder ->
-                val passkey = holder.data?.toDomainOrNull()
+                val passkey = holder.data?.toDomain()
                 AddStateItem.Passkey.State(
                     passkey = passkey,
                 )

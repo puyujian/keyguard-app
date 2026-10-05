@@ -43,8 +43,8 @@ import kotlin.time.Instant
  *
  * Encode writes KPEX only for a public-key ES256/P-256 discoverable credential
  * with valid base64url id/user handle, non-blank relying party, and a private
- * key convertible to PKCS#8 PEM. Other credentials are left to the parent
- * codec's concealed `FIDO2 Credentials Blob #<index>` fallback.
+ * key convertible to PKCS#8 PEM and no PRF secret. Other credentials are left to
+ * the parent codec's concealed `FIDO2 Credentials Blob #<index>` fallback.
  */
 internal class KeePassPasskeyCodec(
     private val base64Service: Base64Service,
@@ -263,11 +263,13 @@ internal class KeePassPasskeyCodec(
     // matches the values decode hardcodes (toCredential): a public-key ES256/
     // P-256 key that is discoverable. Otherwise it must take the lossless blob
     // path so counter / key algorithm/curve / discoverable are not dropped.
+    // KPEX cannot store the independent PRF secret; use the blob for it too.
     private fun BitwardenCipher.Login.Fido2Credentials.isKpexRepresentable(): Boolean =
         keyType == PUBLIC_KEY_CREDENTIAL_TYPE &&
                 keyAlgorithm == KEY_ALGORITHM_ECDSA &&
                 keyCurve == KEY_CURVE_P256 &&
-                discoverable == DEFAULT_DISCOVERABLE
+                discoverable == DEFAULT_DISCOVERABLE &&
+                prfSecret == null
 
     private fun encodeCredential(
         credential: BitwardenCipher.Login.Fido2Credentials,

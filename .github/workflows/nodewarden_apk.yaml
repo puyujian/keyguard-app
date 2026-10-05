@@ -31,6 +31,13 @@ jobs:
       - uses: ./.github/actions/prefetch_native
         with:
           profile: android
+          manifests: |
+            util/instance/rust/Cargo.toml
+            util/yubikey/rust/Cargo.toml
+            util/fido2/rust/Cargo.toml
+            desktopLibNative/src/Cargo.toml
+            desktopSshAgent/src/Cargo.toml
+            desktopGpgAgent/src/Cargo.toml
       - name: Prepare fork build
         run: |
           {
@@ -53,9 +60,14 @@ jobs:
             --tests 'com.artemchep.keyguard.provider.bitwarden.entity.api.LoginFido2CredentialsRequestTest' \
             --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.CipherCryptoUriSignatureTest' \
             --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.CipherDecoderTest' \
+            --tests 'com.artemchep.keyguard.feature.home.vault.add.AddStateProducerPasskeyTest' \
+            --tests 'com.artemchep.keyguard.common.service.export.impl.JsonExportServiceImplTest' \
             -Pkeyguard.nativeCargo.cargoOffline=true
           ./gradlew :util:webauthn:testAndroidHostTest \
             --tests 'com.artemchep.keyguard.util.webauthn.WebAuthnAuthenticatorTest' \
+            -Pkeyguard.nativeCargo.cargoOffline=true
+          ./gradlew :common:desktopTest \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.codec.KeePassPasskeyPrfTest' \
             -Pkeyguard.nativeCargo.cargoOffline=true
       - name: Build unsigned release APK
         run: >-
