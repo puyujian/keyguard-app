@@ -1,0 +1,87 @@
+name: Nodewarden PRF APK
+
+on:
+  push:
+    branches: [codex/keyguard-webauthn-prf-nodewarden]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nodewarden-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup_gradle
+      - uses: ./.github/actions/setup_android_ndk
+      - uses: ./.github/actions/setup_rust
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          cache-key: android
+      - uses: ./.github/actions/prefetch_native
+        with:
+          profile: android
+      - name: Prepare fork build
+        run: |
+          {
+            echo ""
+            echo "versionRef=$(git rev-parse --short HEAD)"
+            echo buildkonfig.flavor=release
+            echo kotlin.compiler.execution.strategy=in-process
+            echo org.gradle.workers.max=2
+          } >> gradle.properties
+      - uses: ./.github/actions/build_android_licenses
+        with:
+          build-flavor: None
+      - name: PRF and Nodewarden regressions
+        run: |
+          ./gradlew :common:testAndroidHostTest \
+            --tests 'com.artemchep.keyguard.android.PasskeyPrfTest' \
+            --tests 'com.artemchep.keyguard.android.PasskeyProviderGetRequestTest' \
+            --tests 'com.artemchep.keyguard.common.service.passkey.WebAuthnAdaptersTest' \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.entity.LoginFido2CredentialsEntityTest' \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.entity.api.LoginFido2CredentialsRequestTest' \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.CipherCryptoUriSignatureTest' \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.CipherDecoderTest' \
+            -Pkeyguard.nativeCargo.cargoOffline=true
+          ./gradlew :util:webauthn:testAndroidHostTest \
+            --tests 'com.artemchep.keyguard.util.webauthn.WebAuthnAuthenticatorTest' \
+            -Pkeyguard.nativeCargo.cargoOffline=true
+      - name: Build unsigned release APK
+        run: >-
+          ./gradlew :androidApp:assembleNoneRelease
+          --init-script scripts/fork-unsigned.init.gradle
+          -Pkeyguard.nativeCargo.cargoOffline=true
+      - name: Verify native bundle
+        run: >-
+          python scripts/verify_native_bundle.py android
+          androidApp/build/outputs/apk/none/release/androidApp-none-release-unsigned.apk
+      - name: Upload APK for private offline signing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nodewarden-prf-unsigned
+          path: |
+            androidApp/build/outputs/apk/none/release/*.apk
+            androidApp/build/outputs/mapping/noneRelease/mapping.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nodewarden-prf-tests
+          path: |
+            common/build/test-results/
+            util/webauthn/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 30
