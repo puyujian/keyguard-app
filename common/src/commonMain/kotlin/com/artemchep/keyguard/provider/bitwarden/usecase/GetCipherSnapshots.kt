@@ -1,6 +1,7 @@
 package com.artemchep.keyguard.provider.bitwarden.usecase
 
 import app.cash.sqldelight.coroutines.asFlow
+import com.artemchep.keyguard.common.service.crypto.GpgKeyMetadataResolver
 import com.artemchep.keyguard.common.service.database.DatabaseDispatcher
 import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
 import com.artemchep.keyguard.common.service.logging.LogRepository
@@ -9,6 +10,7 @@ import com.artemchep.keyguard.common.usecase.GetCipherSnapshots
 import com.artemchep.keyguard.common.usecase.GetPasswordStrength
 import com.artemchep.keyguard.common.usecase.WindowCoroutineScope
 import com.artemchep.keyguard.common.util.withLogTimeOfFirstEvent
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,9 +21,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import kotlin.coroutines.CoroutineContext
 
 /**
  * @author Artem Chepurnyi
@@ -33,19 +32,12 @@ internal class GetCipherSnapshotsImpl(
     private val getPasswordStrength: GetPasswordStrength,
     private val windowCoroutineScope: WindowCoroutineScope,
     private val dbDispatcher: CoroutineDispatcher,
+    private val gpgKeyMetadataResolver: GpgKeyMetadataResolver? = null,
     private val defaultDispatcher: CoroutineContext = Dispatchers.Default,
 ) : GetCipherSnapshots {
     companion object {
         private const val TAG = "GetCipherSnapshots.bitwarden"
     }
-
-    constructor(directDI: DirectDI) : this(
-        logRepository = directDI.instance(),
-        databaseManager = directDI.instance(),
-        getPasswordStrength = directDI.instance(),
-        windowCoroutineScope = directDI.instance(),
-        dbDispatcher = directDI.instance(tag = DatabaseDispatcher),
-    )
 
     private val sharedFlow = databaseManager
         .get()
@@ -55,6 +47,8 @@ internal class GetCipherSnapshotsImpl(
             val loader = CipherSnapshotLoader(
                 dbDispatcher = dbDispatcher,
                 getPasswordStrength = getPasswordStrength,
+                gpgKeyMetadataResolver = gpgKeyMetadataResolver,
+                logRepository = logRepository,
             )
             db.cipherQueries
                 .getCipherSnapshotKeys()

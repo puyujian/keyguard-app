@@ -2,8 +2,10 @@ package com.artemchep.keyguard.android
 
 import androidx.credentials.exceptions.domerrors.NotAllowedError
 import androidx.credentials.exceptions.publickeycredential.GetPublicKeyCredentialDomException
-import com.artemchep.keyguard.common.service.webauthn.PasskeyBase64
-import com.artemchep.keyguard.common.service.webauthn.PasskeyCredentialId
+import com.artemchep.keyguard.common.exception.credential.CallingAppNotPrivilegedException
+import com.artemchep.keyguard.common.service.passkey.toPasskeyTargetCredentials
+import com.artemchep.keyguard.util.webauthn.PasskeyBase64
+import com.artemchep.keyguard.util.webauthn.PasskeyCredentialId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -56,7 +58,7 @@ class PasskeyBeginGetRequestTest {
             json = json,
         )
 
-        val targetCredentials = assertNotNull(result.toPasskeyTargetAllowedCredentials())
+        val targetCredentials = assertNotNull(result.toPasskeyTargetCredentials())
         val targetCredential = targetCredentials.single()
         assertEquals("public-key", targetCredential.type)
         assertEquals(credentialId, targetCredential.credentialId)
@@ -71,7 +73,34 @@ class PasskeyBeginGetRequestTest {
             json = json,
         )
 
-        assertNull(result.toPasskeyTargetAllowedCredentials())
+        assertNull(result.toPasskeyTargetCredentials())
+    }
+
+    @Test
+    fun `begin get origin resolution returns the resolved origin`() {
+        val origin = resolveCredentialProviderBeginGetOriginOrNull {
+            "https://login.example.com"
+        }
+
+        assertEquals("https://login.example.com", origin)
+    }
+
+    @Test
+    fun `begin get origin resolution hides entries when origin can not be resolved`() {
+        val origin = resolveCredentialProviderBeginGetOriginOrNull {
+            throw IllegalStateException("Request origin has an unknown scheme.")
+        }
+
+        assertNull(origin)
+    }
+
+    @Test
+    fun `begin get origin resolution propagates a non-privileged calling app`() {
+        assertFailsWith<CallingAppNotPrivilegedException> {
+            resolveCredentialProviderBeginGetOriginOrNull {
+                throw CallingAppNotPrivilegedException()
+            }
+        }
     }
 
     private fun requestJson(

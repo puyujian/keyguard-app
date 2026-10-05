@@ -3,31 +3,27 @@ package com.artemchep.keyguard.common.usecase.impl
 import com.artemchep.keyguard.common.io.IO
 import com.artemchep.keyguard.common.io.bind
 import com.artemchep.keyguard.common.io.ioEffect
-import com.artemchep.keyguard.common.model.GeneratedGpgKey
 import com.artemchep.keyguard.common.service.dirs.DirsService
 import com.artemchep.keyguard.common.usecase.DateFormatter
 import com.artemchep.keyguard.common.usecase.GpgKeyPublicExport
 import com.artemchep.keyguard.util.io.writeText
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 
 class GpgKeyPublicExportImpl(
     private val dirsService: DirsService,
     private val dateFormatter: DateFormatter,
 ) : GpgKeyPublicExport {
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        dirsService = directDI.instance(),
-        dateFormatter = directDI.instance(),
-    )
-
     override fun invoke(
-        parameter: GeneratedGpgKey,
+        request: GpgKeyPublicExport.Request,
     ): IO<String?> = ioEffect {
-        val fileName = "gpg_${parameter.fingerprint.gpgFileSafeSuffix()}_${dateFormatter.gpgExportDateSuffix()}.public.asc"
+        val fileName = buildString {
+            append("gpg_")
+            append(request.fingerprint.gpgFileSafeSuffix())
+            append('_')
+            append(dateFormatter.gpgExportDateSuffix())
+            append(".public.asc")
+        }
         dirsService.saveToDownloads(fileName) { os ->
-            os.writeText(parameter.publicKeyArmored)
+            os.writeText(request.publicKeyArmored)
         }.bind()
     }
 }

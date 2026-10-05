@@ -9,6 +9,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+private const val NATIVE_FALSE = 0
+private const val NATIVE_TRUE = 1
+
 internal class BiometricsCallbackRetention {
     private val callbacks = ConcurrentHashMap.newKeySet<DesktopLibJna.BiometricsVerifyCallback>()
 
@@ -29,6 +32,9 @@ internal fun DisposableScope.autoTypeOrThrow(
     lib: DesktopLibJna,
     payload: String,
 ) {
+    require('\u0000' !in payload) {
+        "AutoType payload contains an unsupported character."
+    }
     val success = lib.autoType(
         payload = payload
             .asMemory()
@@ -82,13 +88,39 @@ internal fun DisposableScope.keychainGetPasswordOrThrow(
 
 internal suspend fun biometricsVerifyOrThrow(
     lib: DesktopLibJna,
+    windowHandle: Long,
     title: String,
     callbackRetention: BiometricsCallbackRetention = biometricsCallbackRetention,
+) = awaitBiometricsStatus(callbackRetention) { scope, callback ->
+    lib.biometricsVerify(
+        windowHandle = windowHandle,
+        title = title
+            .asMemory()
+            .let(scope::register),
+        callback = callback,
+    )
+}
+
+internal suspend fun biometricsPrepareEnrollmentOrThrow(
+    lib: DesktopLibJna,
+    callbackRetention: BiometricsCallbackRetention = biometricsCallbackRetention,
+) = awaitBiometricsStatus(callbackRetention) { _, callback ->
+    lib.biometricsPrepareEnrollment(callback)
+}
+
+/**
+ * Invokes a native call that reports a `BiometricsStatus` through a
+ * [DesktopLibJna.BiometricsVerifyCallback], possibly asynchronously, and
+ * suspends until it does. Any status other than success is thrown.
+ */
+private suspend fun awaitBiometricsStatus(
+    callbackRetention: BiometricsCallbackRetention,
+    invoke: (DisposableScope, DesktopLibJna.BiometricsVerifyCallback) -> Unit,
 ) {
     suspendCancellableCoroutine<Unit> { continuation ->
         val scope = DisposableScope()
         val callback = object : DesktopLibJna.BiometricsVerifyCallback {
-            override fun invoke(success: Boolean, error: Pointer?) {
+            override fun invoke(status: Int, error: Pointer?) {
                 if (!callbackRetention.release(this)) {
                     return
                 }
@@ -97,23 +129,24 @@ internal suspend fun biometricsVerifyOrThrow(
                     return
                 }
 
-                if (success) {
-                    continuation.resume(Unit)
-                } else {
-                    val message = error?.getString(0L) ?: "Unknown error"
-                    continuation.resumeWithException(RuntimeException(message))
+                when (val nativeStatus = BiometricsStatus.fromCode(status)) {
+                    BiometricsStatus.SUCCESS -> {
+                        continuation.resume(Unit)
+                    }
+                    else -> {
+                        val exception = BiometricsException(
+                            status = nativeStatus,
+                            message = error?.getString(0L) ?: "Biometric verification failed.",
+                        )
+                        continuation.resumeWithException(exception)
+                    }
                 }
             }
         }
         callbackRetention.retain(callback)
 
         try {
-            lib.biometricsVerify(
-                title = title
-                    .asMemory()
-                    .let(scope::register),
-                callback = callback,
-            )
+            invoke(scope, callback)
         } catch (e: Throwable) {
             if (callbackRetention.release(callback) && continuation.isActive) {
                 continuation.resumeWithException(e)
@@ -122,4 +155,61 @@ internal suspend fun biometricsVerifyOrThrow(
             scope.dispose()
         }
     }
+}
+
+internal fun DisposableScope.biometricsTransformSecretOrThrow(
+    lib: DesktopLibJna,
+    windowHandle: Long,
+    title: String,
+    input: ByteArray,
+    decrypt: Boolean,
+): ByteArray {
+    require(input.isNotEmpty()) {
+        "Input must not be empty."
+    }
+
+    var outcome: Result<ByteArray>? = null
+    val callback = object : DesktopLibJna.BiometricsResultCallback {
+        override fun invoke(
+            status: Int,
+            result: Pointer?,
+            resultLength: Long,
+            error: Pointer?,
+        ) {
+            val nativeStatus = BiometricsStatus.fromCode(status)
+            outcome = if (nativeStatus == BiometricsStatus.SUCCESS) {
+                val length = resultLength.toInt()
+                if (result == null || length <= 0 || length.toLong() != resultLength) {
+                    Result.failure(IllegalStateException("Native library returned an invalid result."))
+                } else {
+                    Result.success(result.getByteArray(0L, length))
+                }
+            } else {
+                Result.failure(
+                    BiometricsException(
+                        status = nativeStatus,
+                        message = error?.getString(0L) ?: "Biometric verification failed.",
+                    ),
+                )
+            }
+        }
+    }
+    val success = lib.biometricsTransformSecret(
+        windowHandle = windowHandle,
+        title = title
+            .asMemory()
+            .let(::register),
+        input = input
+            .asMemory()
+            .let(::register),
+        inputLength = input.size.toLong(),
+        decrypt = if (decrypt) NATIVE_TRUE else NATIVE_FALSE,
+        callback = callback,
+    )
+    check(success != NATIVE_FALSE) {
+        "Failed to invoke the biometric secret transform."
+    }
+    return checkNotNull(outcome) {
+        "Biometric secret transform did not complete synchronously."
+    }.getOrThrow()
 }

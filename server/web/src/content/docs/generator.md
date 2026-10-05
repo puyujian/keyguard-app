@@ -7,7 +7,7 @@ order: 8
 
 The generator creates fresh credentials whenever you need them. Every mode
 lives on the same **Generator** screen — pick the mode, tune its options, and
-copy the result — and the same generator is one tap away when you edit an
+copy the result — and you can open the generator directly when editing an
 item's field.
 
 ## Passwords
@@ -27,7 +27,7 @@ least **15 characters** for a password used as the only authentication factor.
 ## Passphrases
 
 A sequence of random words — `correct-horse-battery-staple` — much easier to
-remember and type than a character soup of the same strength. You choose the
+remember and type than random characters of the same strength. You choose the
 **number of words**, the **delimiter**, **capitalization**, and whether to
 include a **number**. Words are drawn from the built-in dictionary or from
 your own [wordlists](#custom-wordlists).
@@ -92,22 +92,21 @@ by default) — stored as an SSH key item, ready to be served by the
 Generates an OpenPGP key, stored as a [GPG key](/docs/gpg-keys/) item, in one
 of two profiles:
 
-- **Modern** — an **Ed25519** primary key with a separate **Ed25519** signing
-  subkey and an **X25519** (Curve25519) encryption subkey. These are built with
-  the widely-compatible v4 EdDSA/ECDH encodings so that GnuPG and other clients
-  can import them.
-- **RSA** — a single RSA key, **3072** or **4096** bits (4096 by default).
+- **Modern** — an **Ed25519** certification key with a separate **Ed25519**
+  signing subkey and an **X25519** (Curve25519) encryption subkey.
+- **RSA** — an RSA certification key with separate RSA signing and encryption
+  subkeys, **3072** or **4096** bits (4096 by default).
 
-Generation does not currently set an expiration date or a passphrase, and does
-not offer DSA, ElGamal, NIST, or custom-curve keys.
+Choose **v4** for compatibility with GnuPG and older clients, or
+**v6** for clients that support [RFC 9580](https://www.rfc-editor.org/rfc/rfc9580.html).
 
 ----
 
 ## Custom wordlists
 
-Passphrases and usernames can draw on your own wordlists instead of the
-built-in dictionary. Manage them from the **Generator** screen under
-**Wordlists** — a wordlist can be loaded from a file or from a URL.
+Passphrases and usernames can draw on custom wordlists. Manage them from the
+**Generator** screen under **Wordlists** — a wordlist can be loaded from a file
+or from a URL.
 
 ### File format
 

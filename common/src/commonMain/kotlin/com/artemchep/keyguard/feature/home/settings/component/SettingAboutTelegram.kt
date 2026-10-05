@@ -5,22 +5,23 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import com.artemchep.keyguard.URL_REDDIT
 import com.artemchep.keyguard.feature.home.settings.KgAction
 import com.artemchep.keyguard.feature.home.settings.LocalSettingPaneComponents
 import com.artemchep.keyguard.feature.navigation.LocalNavigationController
 import com.artemchep.keyguard.feature.navigation.NavigationIntent
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.platform.util.hasBrowser
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.icons.ChevronIcon
 import com.artemchep.keyguard.ui.icons.KeyguardWebsite
 import kotlinx.coroutines.flow.flowOf
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.DirectDI
+import org.koin.core.scope.Scope
 
 fun settingAboutTelegramProvider(
-    directDI: DirectDI,
+    koinScope: Scope,
 ) = settingAboutTelegramProvider()
 
 fun settingAboutTelegramProvider(): SettingComponent = kotlin.run {
@@ -47,7 +48,7 @@ fun settingAboutTelegramProvider(): SettingComponent = kotlin.run {
         SettingAboutTelegram(
             onClick = {
                 val intent = NavigationIntent.NavigateToBrowser(
-                    url = "https://www.reddit.com/r/keyguard/",
+                    url = URL_REDDIT,
                 )
                 navigationController.queue(intent)
             },

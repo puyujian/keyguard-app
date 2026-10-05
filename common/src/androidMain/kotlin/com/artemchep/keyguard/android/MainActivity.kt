@@ -6,13 +6,14 @@ import android.os.Bundle
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.core.content.pm.ShortcutManagerCompat
 import com.artemchep.keyguard.AppMode
 import com.artemchep.keyguard.LocalAppMode
+import com.artemchep.keyguard.android.util.ShortcutIds
 import com.artemchep.keyguard.common.service.deeplink.DeeplinkService
 import com.artemchep.keyguard.feature.keyguard.AppRoute
 import com.artemchep.keyguard.feature.navigation.NavigationNode
 import com.artemchep.keyguard.platform.recordLog
-import org.kodein.di.instance
 
 class MainActivity : BaseActivity() {
     companion object {
@@ -21,7 +22,7 @@ class MainActivity : BaseActivity() {
         ): Intent = Intent(context, MainActivity::class.java)
     }
 
-    private val deeplinkService by instance<DeeplinkService>()
+    private val deeplinkService by lazy { koin.get<DeeplinkService>() }
 
     @Composable
     override fun Content() {
@@ -51,6 +52,10 @@ class MainActivity : BaseActivity() {
     private fun updateDeeplinkFromIntent(intent: Intent) {
         val customFilter = intent.getStringExtra("customFilter")
         if (customFilter != null) {
+            ShortcutManagerCompat.reportShortcutUsed(
+                this,
+                ShortcutIds.forFilter(customFilter),
+            )
             deeplinkService.put(DeeplinkService.CUSTOM_FILTER, customFilter)
         }
 

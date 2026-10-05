@@ -38,11 +38,25 @@ public enum class NativeCryptoCapability(
     SSH_CXF_EXPORT(bit = 1L shl 25),
     SSH_PUBLIC_KEY_DECODE(bit = 1L shl 26),
     OPENPGP_CLEAR_VERIFY(bit = 1L shl 27),
+    /** Native OpenPGP sign/encrypt operations enforce external designated revocations. */
+    OPENPGP_EXTERNAL_REVOCATION_POLICY(bit = 1L shl 28),
+    /** Native OpenPGP operations can emit signed User ID revocations. */
+    OPENPGP_SIGNED_REVOCATION(bit = 1L shl 29),
+    /** Native OpenPGP operations can replace textual User IDs atomically. */
+    OPENPGP_USER_ID_REPLACEMENT(bit = 1L shl 30),
+    /** Native OpenPGP reconciliation exposes separate local and transferable V2 outputs. */
+    OPENPGP_CERTIFICATE_MATERIAL_RECONCILE_V2(bit = 1L shl 32),
+    /** Native OpenPGP evaluates exact User ID certifications against explicit trust roots. */
+    OPENPGP_USER_ID_CERTIFICATION(bit = 1L shl 33),
+    /** Native OpenPGP decryption supports bounded output draining after input EOF. */
+    OPENPGP_STREAM_DRAIN(bit = 1L shl 34),
+    /** Native OpenPGP generation and certificate mutations support V4 and V6. */
+    OPENPGP_V6_GENERATION_MUTATION(bit = 1L shl 35),
 }
 
 public object NativeCrypto {
     public const val EXPECTED_ABI_VERSION: Int = 1
-    public const val PROTOCOL_VERSION: Int = 1
+    public const val PROTOCOL_VERSION: Int = 2
     public const val MAX_CONTROL_ENVELOPE_BYTES: Int = 16 * 1024 * 1024
 
     private val client: NativeCryptoClient by lazy {
@@ -64,7 +78,7 @@ public object NativeCrypto {
     public val abiVersion: Int
         get() = client.abiVersion
 
-    public val capabilities: Set<NativeCryptoCapability>
+    internal val capabilities: Set<NativeCryptoCapability>
         get() = client.capabilities
 
     /** Eagerly loads the native library and verifies its ABI and required capabilities. */
@@ -117,126 +131,10 @@ public object NativeCrypto {
         plaintextOutput = plaintextOutput,
     )
 
-    internal fun openHmacSha256(key: ByteArray): NativeCryptoSession =
-        client.openHmacSha256(key)
-
-    internal fun openDigest(algorithm: HashAlgorithmProto): NativeCryptoSession =
-        client.openDigest(algorithm)
-
-    internal fun openHmac(
-        algorithm: HashAlgorithmProto,
-        key: ByteArray,
-    ): NativeCryptoSession = client.openHmac(algorithm, key)
-
-    internal fun openAesCbcPkcs7(
-        direction: CipherDirectionProto,
-        key: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = client.openAesCbcPkcs7(direction, key, iv)
-
-    internal fun openAesCbcPkcs7HmacSha256Encrypt(
-        encryptionKey: ByteArray,
-        macKey: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = client.openAesCbcPkcs7HmacSha256Encrypt(
-        encryptionKey = encryptionKey,
-        macKey = macKey,
-        iv = iv,
-    )
-
-    internal fun openAesCbcPkcs7HmacSha256Decrypt(
-        encryptionKey: ByteArray,
-        macKey: ByteArray,
-        iv: ByteArray,
-        expectedMac: ByteArray,
-    ): NativeCryptoSession = client.openAesCbcPkcs7HmacSha256Decrypt(
-        encryptionKey = encryptionKey,
-        macKey = macKey,
-        iv = iv,
-        expectedMac = expectedMac,
-    )
-
-    internal fun openTwofishCbcPkcs7(
-        direction: CipherDirectionProto,
-        key: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = client.openTwofishCbcPkcs7(direction, key, iv)
-
-    internal fun openPgpDetachedVerification(
-        signature: ByteArray,
-        publicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = client.openPgpDetachedVerification(
-        signature = signature,
-        publicKeys = publicKeys,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-    )
-
-    internal fun openPgpClearVerification(
-        publicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = client.openPgpClearVerification(
-        publicKeys = publicKeys,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-    )
-
-    internal fun openPgpDetachedSigning(
-        privateKey: ByteArray,
-        preferredFingerprint: String,
-        armored: Boolean,
-        signatureTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = client.openPgpDetachedSigning(
-        privateKey = privateKey,
-        preferredFingerprint = preferredFingerprint,
-        armored = armored,
-        signatureTimeEpochSeconds = signatureTimeEpochSeconds,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-    )
-
-    internal fun openPgpClearSigning(
-        privateKey: ByteArray,
-        preferredFingerprint: String,
-        signatureTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = client.openPgpClearSigning(
-        privateKey = privateKey,
-        preferredFingerprint = preferredFingerprint,
-        signatureTimeEpochSeconds = signatureTimeEpochSeconds,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-    )
-
-    internal fun openPgpEncryption(
-        publicKeys: List<ByteArray>,
-        signingPrivateKey: ByteArray?,
-        preferredSigningFingerprint: String,
-        fileName: String,
-        armored: Boolean,
-        literalTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-        enableCompression: Boolean,
-    ): NativeCryptoSession = client.openPgpEncryption(
-        publicKeys = publicKeys,
-        signingPrivateKey = signingPrivateKey,
-        preferredSigningFingerprint = preferredSigningFingerprint,
-        fileName = fileName,
-        armored = armored,
-        literalTimeEpochSeconds = literalTimeEpochSeconds,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-        enableCompression = enableCompression,
-    )
-
-    internal fun openPgpDecryption(
-        privateKeys: List<ByteArray>,
-        verificationPublicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-        allowSignedOnly: Boolean,
-    ): NativeCryptoSession = client.openPgpDecryption(
-        privateKeys = privateKeys,
-        verificationPublicKeys = verificationPublicKeys,
-        referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-        allowSignedOnly = allowSignedOnly,
-    )
+    internal fun openSession(
+        operationName: String,
+        operation: NativeStreamOpenOperationProto,
+    ): NativeCryptoSession = client.openSession(operationName, operation)
 }
 
 internal class NativeCryptoClient(
@@ -402,201 +300,7 @@ internal class NativeCryptoClient(
         )
     }
 
-    fun openHmacSha256(key: ByteArray): NativeCryptoSession {
-        return openSession(
-            operationName = "hmac_sha256.stream_open",
-            operation = HmacSha256StreamOpenOperationProto(
-                HmacSha256StreamOpenRequestProto(key),
-            ),
-        )
-    }
-
-    fun openDigest(algorithm: HashAlgorithmProto): NativeCryptoSession = openSession(
-        operationName = "digest.stream_open",
-        operation = DigestStreamOpenOperationProto(
-            DigestStreamOpenRequestProto(algorithm),
-        ),
-    )
-
-    fun openHmac(
-        algorithm: HashAlgorithmProto,
-        key: ByteArray,
-    ): NativeCryptoSession = openSession(
-        operationName = "hmac.stream_open",
-        operation = HmacStreamOpenOperationProto(
-            HmacStreamOpenRequestProto(algorithm = algorithm, key = key),
-        ),
-    )
-
-    fun openAesCbcPkcs7(
-        direction: CipherDirectionProto,
-        key: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = openSession(
-        operationName = "aes_cbc_pkcs7.stream_open",
-        operation = AesCbcPkcs7StreamOpenOperationProto(
-            AesCbcPkcs7StreamOpenRequestProto(
-                direction = direction,
-                key = key,
-                iv = iv,
-            ),
-        ),
-    )
-
-    fun openAesCbcPkcs7HmacSha256Encrypt(
-        encryptionKey: ByteArray,
-        macKey: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = openSession(
-        operationName = "aes_cbc_pkcs7_hmac_sha256_encrypt.stream_open",
-        operation = AesCbcPkcs7HmacSha256EncryptStreamOpenOperationProto(
-            AesCbcPkcs7HmacSha256EncryptStreamOpenRequestProto(
-                encryptionKey = encryptionKey,
-                macKey = macKey,
-                iv = iv,
-            ),
-        ),
-    )
-
-    fun openAesCbcPkcs7HmacSha256Decrypt(
-        encryptionKey: ByteArray,
-        macKey: ByteArray,
-        iv: ByteArray,
-        expectedMac: ByteArray,
-    ): NativeCryptoSession = openSession(
-        operationName = "aes_cbc_pkcs7_hmac_sha256_decrypt.stream_open",
-        operation = AesCbcPkcs7HmacSha256DecryptStreamOpenOperationProto(
-            AesCbcPkcs7HmacSha256DecryptStreamOpenRequestProto(
-                encryptionKey = encryptionKey,
-                macKey = macKey,
-                iv = iv,
-                expectedMac = expectedMac,
-            ),
-        ),
-    )
-
-    fun openTwofishCbcPkcs7(
-        direction: CipherDirectionProto,
-        key: ByteArray,
-        iv: ByteArray,
-    ): NativeCryptoSession = openSession(
-        operationName = "twofish_cbc_pkcs7.stream_open",
-        operation = TwofishCbcPkcs7StreamOpenOperationProto(
-            TwofishCbcPkcs7StreamOpenRequestProto(
-                direction = direction,
-                key = key,
-                iv = iv,
-            ),
-        ),
-    )
-
-    fun openPgpDetachedVerification(
-        signature: ByteArray,
-        publicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_detached_verify.stream_open",
-        operation = OpenPgpDetachedVerifyStreamOpenOperationProto(
-            OpenPgpDetachedVerifyStreamOpenRequestProto(
-                signature = signature,
-                publicKeys = publicKeys,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-            ),
-        ),
-    )
-
-    fun openPgpClearVerification(
-        publicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_clear_verify.stream_open",
-        operation = OpenPgpClearVerifyStreamOpenOperationProto(
-            OpenPgpClearVerifyStreamOpenRequestProto(
-                publicKeys = publicKeys,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-            ),
-        ),
-    )
-
-    fun openPgpDetachedSigning(
-        privateKey: ByteArray,
-        preferredFingerprint: String,
-        armored: Boolean,
-        signatureTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_detached_sign.stream_open",
-        operation = OpenPgpDetachedSignStreamOpenOperationProto(
-            OpenPgpDetachedSignStreamOpenRequestProto(
-                privateKey = privateKey,
-                preferredFingerprint = preferredFingerprint,
-                armored = armored,
-                signatureTimeEpochSeconds = signatureTimeEpochSeconds,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-            ),
-        ),
-    )
-
-    fun openPgpClearSigning(
-        privateKey: ByteArray,
-        preferredFingerprint: String,
-        signatureTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_clear_sign.stream_open",
-        operation = OpenPgpClearSignStreamOpenOperationProto(
-            OpenPgpClearSignStreamOpenRequestProto(
-                privateKey = privateKey,
-                preferredFingerprint = preferredFingerprint,
-                signatureTimeEpochSeconds = signatureTimeEpochSeconds,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-            ),
-        ),
-    )
-
-    fun openPgpEncryption(
-        publicKeys: List<ByteArray>,
-        signingPrivateKey: ByteArray?,
-        preferredSigningFingerprint: String,
-        fileName: String,
-        armored: Boolean,
-        literalTimeEpochSeconds: Long?,
-        referenceTimeEpochSeconds: Long?,
-        enableCompression: Boolean,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_encrypt.stream_open",
-        operation = OpenPgpEncryptStreamOpenOperationProto(
-            OpenPgpEncryptStreamOpenRequestProto(
-                publicKeys = publicKeys,
-                signingPrivateKey = signingPrivateKey,
-                preferredSigningFingerprint = preferredSigningFingerprint,
-                fileName = fileName,
-                armored = armored,
-                literalTimeEpochSeconds = literalTimeEpochSeconds,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-                enableCompression = enableCompression,
-            ),
-        ),
-    )
-
-    fun openPgpDecryption(
-        privateKeys: List<ByteArray>,
-        verificationPublicKeys: List<ByteArray>,
-        referenceTimeEpochSeconds: Long?,
-        allowSignedOnly: Boolean,
-    ): NativeCryptoSession = openSession(
-        operationName = "open_pgp_decrypt.stream_open",
-        operation = OpenPgpDecryptStreamOpenOperationProto(
-            OpenPgpDecryptStreamOpenRequestProto(
-                privateKeys = privateKeys,
-                verificationPublicKeys = verificationPublicKeys,
-                referenceTimeEpochSeconds = referenceTimeEpochSeconds,
-                allowSignedOnly = allowSignedOnly,
-            ),
-        ),
-    )
-
-    private fun openSession(
+    fun openSession(
         operationName: String,
         operation: NativeStreamOpenOperationProto,
     ): NativeCryptoSession {
@@ -648,6 +352,20 @@ internal class NativeCryptoClient(
             is BytesResultProto -> result.value
             else -> throw malformedResponse("stream.update")
         }
+    }
+
+    internal fun streamDrain(handle: Long): ByteArray {
+        val operation = "open_pgp_stream_drain"
+        val result = call(
+            operationName = operation,
+            operation = OpenPgpStreamDrainOperationProto(OpenPgpStreamDrainRequestProto(handle)),
+        )
+        val output = requireResultType<BytesResultProto>(operation, result).value
+        if (output.size > NATIVE_CRYPTO_STREAM_CHUNK_BYTES) {
+            clearDiscardedOutput(output)
+            throw malformedResponse(operation)
+        }
+        return output
     }
 
     internal fun streamFinish(handle: Long): ByteArray {
@@ -881,6 +599,12 @@ public interface NativeCryptoSession : AutoCloseable {
         length: Int = data.size - offset,
     ): ByteArray
 
+    /** Drains OpenPGP decryption output after signaling input EOF. */
+    public fun drain(): ByteArray = throw NativeCryptoException(
+        "open_pgp_stream_drain",
+        NativeCryptoErrorCode.INVALID_SESSION,
+    )
+
     /** Finishes and consumes this session. */
     public fun finish(): ByteArray
 
@@ -917,6 +641,11 @@ private class NativeCryptoSessionImpl(
         } finally {
             ownedInput?.fill(0)
         }
+    }
+
+    override fun drain(): ByteArray {
+        checkOpen("open_pgp_stream_drain")
+        return client.streamDrain(handle)
     }
 
     override fun finish(): ByteArray {

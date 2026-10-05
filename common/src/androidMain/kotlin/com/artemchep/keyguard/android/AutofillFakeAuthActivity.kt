@@ -7,11 +7,15 @@ import android.os.Parcelable
 import android.service.autofill.Dataset
 import android.view.autofill.AutofillManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import arrow.core.flatMap
 import arrow.core.toOption
 import com.artemchep.keyguard.android.autofill.AutofillStructure2
+import com.artemchep.keyguard.android.autofill.AutofillViews
+import com.artemchep.keyguard.android.autofill.DatasetBuilder
 import com.artemchep.keyguard.android.clipboard.KeyguardClipboardService
 import com.artemchep.keyguard.android.util.getParcelableCompat
+import com.artemchep.keyguard.common.io.bind
 import com.artemchep.keyguard.common.io.effectMap
 import com.artemchep.keyguard.common.io.flatMap
 import com.artemchep.keyguard.common.io.flatten
@@ -19,6 +23,7 @@ import com.artemchep.keyguard.common.io.handleErrorWith
 import com.artemchep.keyguard.common.io.io
 import com.artemchep.keyguard.common.io.ioUnit
 import com.artemchep.keyguard.common.io.launchIn
+import com.artemchep.keyguard.common.io.runCatchingNonFatal
 import com.artemchep.keyguard.common.io.toIO
 import com.artemchep.keyguard.common.model.AddCipherOpenedHistoryRequest
 import com.artemchep.keyguard.common.model.AddUriCipherRequest
@@ -26,22 +31,27 @@ import com.artemchep.keyguard.common.model.AutofillHint
 import com.artemchep.keyguard.common.model.DSecret
 import com.artemchep.keyguard.common.model.MasterSession
 import com.artemchep.keyguard.common.model.TotpToken
+import com.artemchep.keyguard.common.model.gett
 import com.artemchep.keyguard.common.usecase.AddCipherUsedAutofillHistory
 import com.artemchep.keyguard.common.usecase.AddUriCipher
 import com.artemchep.keyguard.common.usecase.GetAutofillCopyTotp
 import com.artemchep.keyguard.common.usecase.GetAutofillSaveUri
+import com.artemchep.keyguard.common.usecase.GetCiphers
+import com.artemchep.keyguard.common.usecase.GetTotpCode
 import com.artemchep.keyguard.common.usecase.GetVaultSession
 import com.artemchep.keyguard.common.usecase.WindowCoroutineScope
+import com.artemchep.keyguard.di.KeyguardKoinOwner
+import com.artemchep.keyguard.di.keyguardKoin
+import com.artemchep.keyguard.di.resolve
+import com.artemchep.keyguard.platform.recordException
 import com.artemchep.keyguard.platform.recordLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
-import org.kodein.di.DI
-import org.kodein.di.DIAware
-import org.kodein.di.android.closestDI
-import org.kodein.di.instance
 
-class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
+class AutofillFakeAuthActivity : AppCompatActivity(), KeyguardKoinOwner {
     companion object {
         private const val KEY_ARGS = "argsv2"
 
@@ -81,7 +91,7 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
         val structure: AutofillStructure2? = null,
     ) : Parcelable
 
-    override val di: DI by closestDI { this }
+    override val koin get() = this.keyguardKoin()
 
     private val args by lazy {
         val extras = intent.extras
@@ -93,31 +103,82 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
         super.onCreate(savedInstanceState)
         recordLog("Opened autofill fake auth activity")
 
-        val result = args?.dataset
-        if (result != null) {
-            // We want to copy to OTP code when you autofill an
-            // entry, so launch a totp service.
-            val mayNeedToCopyTotp = args?.structure?.items
-                ?.none { it.hint == AutofillHint.APP_OTP } == true
-            if (mayNeedToCopyTotp) {
-                launchCopyTotpService()
-            }
-            launchEditService()
-            launchHistoryService()
-
-            val intent = Intent().apply {
-                putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, result)
-            }
-            setResult(RESULT_OK, intent)
-        } else {
+        val args = args
+        if (args == null) {
             setResult(RESULT_CANCELED)
+            finish()
+            return
         }
-        finish()
+
+        lifecycleScope.launch {
+            val result = runCatchingNonFatal {
+                withContext(Dispatchers.Default) {
+                    resolveDataset(args)
+                }
+            }.getOrElse { e ->
+                recordException(e)
+                null
+            }
+            if (result != null) {
+                // We want to copy to OTP code when you autofill an
+                // entry, so launch a totp service.
+                val mayNeedToCopyTotp = args.structure?.items
+                    ?.none { it.hint == AutofillHint.APP_OTP } == true
+                if (mayNeedToCopyTotp) {
+                    launchCopyTotpService()
+                }
+                launchEditService()
+                launchHistoryService()
+
+                val intent = Intent().apply {
+                    putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, result)
+                }
+                setResult(RESULT_OK, intent)
+            } else {
+                setResult(RESULT_CANCELED)
+            }
+            finish()
+        }
+    }
+
+    private suspend fun resolveDataset(args: Args): Dataset? {
+        val structure = args.structure
+            ?.takeIf { it.items.any { item -> item.hint == AutofillHint.APP_OTP } }
+        return if (structure == null) {
+            args.dataset
+        } else {
+            // This activity runs after verification. Generate OTP fields here,
+            // since values captured before the prompt may have expired.
+            val getVaultSession = koin.get<GetVaultSession>()
+            val session = getVaultSession().first() as? MasterSession.Key
+            val getCiphers = session?.session?.resolve { get<GetCiphers>() }
+            val fields = getCiphers?.let {
+                loadAutofillFields(
+                    accountId = args.accountId,
+                    cipherId = args.cipherId,
+                    hints = structure.items.map { item -> item.hint }.toSet(),
+                    getCiphers = it,
+                    getTotpCode = koin.get(),
+                )
+            }
+            fields?.let {
+                DatasetBuilder.create(
+                    menuPresentation = AutofillViews.buildPopupEntry(
+                        context = this,
+                        title = args.cipherName,
+                    ),
+                    fields = DatasetBuilder.fields(structure.items, it),
+                    provideInlinePresentation = { null },
+                )
+                    .setId(args.cipherId)
+                    .build()
+            }
+        }
     }
 
     private fun launchCopyTotpService() {
-        val windowCoroutineScope: WindowCoroutineScope by instance()
-        val getVaultSession: GetVaultSession by instance()
+        val windowCoroutineScope: WindowCoroutineScope by lazy { koin.get() }
+        val getVaultSession: GetVaultSession by lazy { koin.get() }
 
         getVaultSession()
             .toIO()
@@ -125,7 +186,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
                 val a = session as? MasterSession.Key
                     ?: return@effectMap io(false)
 
-                val getAutofillCopyTotp: GetAutofillCopyTotp by a.di.instance()
+                val getAutofillCopyTotp = a.session.resolve { get<GetAutofillCopyTotp>() }
+                    ?: return@effectMap io(false)
                 getAutofillCopyTotp()
                     .toIO()
             }
@@ -158,8 +220,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
     }
 
     private fun launchEditService() {
-        val windowCoroutineScope: WindowCoroutineScope by instance()
-        val getVaultSession: GetVaultSession by instance()
+        val windowCoroutineScope: WindowCoroutineScope by lazy { koin.get() }
+        val getVaultSession: GetVaultSession by lazy { koin.get() }
 
         getVaultSession()
             .toIO()
@@ -167,7 +229,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
                 val a = session as? MasterSession.Key
                     ?: return@effectMap ioUnit()
 
-                val getAutofillSaveUri: GetAutofillSaveUri by a.di.instance()
+                val getAutofillSaveUri = a.session.resolve { get<GetAutofillSaveUri>() }
+                    ?: return@effectMap ioUnit()
                 // Check if the option to save uris is actually
                 // enabled.
                 val shouldSaveUri = args!!.forceAddUri ||
@@ -176,7 +239,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
                     return@effectMap ioUnit()
                 }
 
-                val addUriCipher: AddUriCipher by a.di.instance()
+                val addUriCipher = a.session.resolve { get<AddUriCipher>() }
+                    ?: return@effectMap ioUnit()
                 val request = AddUriCipherRequest(
                     cipherId = args!!.cipherId,
                     applicationId = args?.structure?.applicationId,
@@ -192,8 +256,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
     }
 
     private fun launchHistoryService() {
-        val windowCoroutineScope: WindowCoroutineScope by instance()
-        val getVaultSession: GetVaultSession by instance()
+        val windowCoroutineScope: WindowCoroutineScope by lazy { koin.get() }
+        val getVaultSession: GetVaultSession by lazy { koin.get() }
 
         getVaultSession()
             .toIO()
@@ -201,7 +265,8 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
                 val a = session as? MasterSession.Key
                     ?: return@effectMap ioUnit()
 
-                val addCipherUsedAutofillHistory: AddCipherUsedAutofillHistory by a.di.instance()
+                val addCipherUsedAutofillHistory = a.session.resolve { get<AddCipherUsedAutofillHistory>() }
+                    ?: return@effectMap ioUnit()
                 val request = AddCipherOpenedHistoryRequest(
                     accountId = args!!.accountId,
                     cipherId = args!!.cipherId,
@@ -212,4 +277,20 @@ class AutofillFakeAuthActivity : AppCompatActivity(), DIAware {
             .flatten()
             .launchIn(windowCoroutineScope)
     }
+}
+
+internal suspend fun loadAutofillFields(
+    accountId: String,
+    cipherId: String,
+    hints: Set<AutofillHint>,
+    getCiphers: GetCiphers,
+    getTotpCode: GetTotpCode,
+): Map<AutofillHint, String>? {
+    val cipher = getCiphers().first()
+        .firstOrNull { it.accountId == accountId && it.id == cipherId }
+        ?: return null
+    return cipher.gett(
+        hints = hints,
+        getTotpCode = getTotpCode,
+    ).bind()
 }

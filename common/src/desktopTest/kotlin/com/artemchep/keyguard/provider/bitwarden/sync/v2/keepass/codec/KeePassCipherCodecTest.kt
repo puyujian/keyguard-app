@@ -1,5 +1,7 @@
 package com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.codec
 
+import app.keemobile.kotpass.models.BinaryData
+import app.keemobile.kotpass.models.BinaryReference
 import app.keemobile.kotpass.models.EntryValue
 import app.keemobile.kotpass.models.XmlExtension
 import app.keemobile.kotpass.models.XmlExtensionContent
@@ -7,15 +9,18 @@ import app.keemobile.kotpass.models.XmlNamespace
 import app.keemobile.kotpass.models.XmlQualifiedName
 import com.artemchep.keyguard.common.service.cipherlink.CipherLinkFields
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
+import com.artemchep.keyguard.common.service.crypto.GpgKeyMetadataResolver
+import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpPublicKey
+import com.artemchep.keyguard.common.usecase.GetPasswordStrength
 import com.artemchep.keyguard.core.store.bitwarden.BitwardenCipher
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.UploadTestPasswordStrength
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.UploadTestUnusedFileService
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.buildEntry
+import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.createTestCipherCodec
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.testBase32Service
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.testBase64Service
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.testBitwardenCipher
 import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.testCryptoGenerator
-import com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.testJson
 import com.artemchep.keyguard.provider.bitwarden.upload.FailingPendingUploadCoordinator
 import com.artemchep.keyguard.provider.bitwarden.upload.PendingUploadCoordinator
 import com.artemchep.keyguard.provider.bitwarden.upload.PendingUploadFile
@@ -24,13 +29,199 @@ import kotlinx.coroutines.test.runTest
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.time.Instant
 
 @Suppress("FunctionNaming")
 class KeePassCipherCodecTest {
     private val codec = createCodec()
+
+    @Test
+    fun `decode calculates password strength once`() = runTest {
+        var calls = 0
+        val countingGetPasswordStrength = object : GetPasswordStrength {
+            override fun invoke(password: String) =
+                UploadTestPasswordStrength(password).also { calls++ }
+        }
+        val codec = createCodec(
+            getPasswordStrength = countingGetPasswordStrength,
+        )
+
+        val decoded = codec.decode(
+            accountId = "account",
+            folderId = null,
+            cipherId = "cipher",
+            remote = buildEntry(
+                username = "alice",
+                password = "password",
+            ),
+            local = null,
+            revisionDate = REVISION_DATE,
+            binaries = emptyMap(),
+        )
+
+        assertEquals(1, calls)
+        assertEquals("password", decoded.login?.passwordStrength?.password)
+    }
+
+    @Test
+    fun `decode resolves GPG metadata once`() = runTest {
+        var calls = 0
+        val countingResolver = object : GpgKeyMetadataResolver {
+            override fun resolve(
+                privateKeyArmored: String?,
+                publicKeyArmored: String?,
+                fingerprint: String?,
+                candidateRevocationKeys: List<GpgOpenPgpPublicKey>,
+            ) = null.also { calls++ }
+        }
+        val codec = createCodec(
+            gpgKeyMetadataResolver = countingResolver,
+        )
+
+        codec.decode(
+            accountId = "account",
+            folderId = null,
+            cipherId = "cipher",
+            remote = buildEntry(
+                extraFields = mapOf(
+                    KeePassFieldKey.GPG_FINGERPRINT to EntryValue.Plain("fingerprint"),
+                ),
+            ),
+            local = null,
+            revisionDate = REVISION_DATE,
+            binaries = emptyMap(),
+        )
+
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun `decode stores a one-level canonical remote snapshot`() = runTest {
+        val remote = buildEntry(
+            title = "Canonical name",
+            username = "alice",
+            password = "password",
+        )
+
+        val decoded = codec.decode(
+            accountId = "account",
+            folderId = null,
+            cipherId = "cipher",
+            remote = remote,
+            local = null,
+            revisionDate = REVISION_DATE,
+            binaries = emptyMap(),
+        )
+
+        val snapshot = assertNotNull(decoded.remoteEntity)
+        assertNull(snapshot.remoteEntity)
+        assertEquals(decoded.copy(remoteEntity = null), snapshot)
+    }
+
+    @Test
+    fun `decode preserves the local cipher key outside the remote snapshot`() = runTest {
+        val local = testBitwardenCipher(cipherId = TARGET_REMOTE_ID).copy(
+            keyBase64 = "local-cipher-key",
+        )
+        val remote = buildEntry(
+            title = "Canonical name",
+        )
+
+        val decoded = codec.decode(
+            accountId = local.accountId,
+            folderId = null,
+            cipherId = local.cipherId,
+            remote = remote,
+            local = local,
+            revisionDate = REVISION_DATE,
+            binaries = emptyMap(),
+        )
+
+        assertEquals(local.keyBase64, decoded.keyBase64)
+        assertNull(assertNotNull(decoded.remoteEntity).keyBase64)
+    }
+
+    @Test
+    fun `encode does not materialize local password history in a new KDBX entry`() = runTest {
+        val local = testBitwardenCipher(cipherId = TARGET_REMOTE_ID).copy(
+            revisionDate = REVISION_DATE,
+            type = BitwardenCipher.Type.Login,
+            secureNote = null,
+            login = BitwardenCipher.Login(
+                password = "current-password",
+                uris = emptyList(),
+            ),
+            passwordHistory = listOf(
+                BitwardenCipher.Login.PasswordHistory(
+                    password = "older-password",
+                    lastUsedDate = Instant.parse("2023-12-01T00:00:00Z"),
+                ),
+                BitwardenCipher.Login.PasswordHistory(
+                    password = "newer-password",
+                    lastUsedDate = Instant.parse("2023-12-02T00:00:00Z"),
+                ),
+            ),
+        )
+
+        val encoded = codec.encode(
+            local = local,
+            remote = null,
+            existingBinaries = emptyMap(),
+        )
+        val decoded = codec.decode(
+            accountId = local.accountId,
+            folderId = null,
+            cipherId = local.cipherId,
+            remote = encoded.entry,
+            local = null,
+            revisionDate = REVISION_DATE,
+            binaries = encoded.binaryAdditions,
+        )
+
+        assertEquals(emptyList(), encoded.entry.history)
+        assertEquals(emptyList(), decoded.passwordHistory)
+    }
+
+    @Test
+    fun `encode preserves KDBX history and current remote snapshot but ignores local history`() = runTest {
+        val historicEntry = buildEntry(password = "historic-password")
+        val remote = buildEntry(password = "remote-password").copy(
+            history = listOf(historicEntry),
+        )
+        val local = testBitwardenCipher(cipherId = remote.uuid.toString()).copy(
+            revisionDate = REVISION_DATE,
+            type = BitwardenCipher.Type.Login,
+            secureNote = null,
+            login = BitwardenCipher.Login(
+                password = "current-password",
+                uris = emptyList(),
+            ),
+            passwordHistory = listOf(
+                BitwardenCipher.Login.PasswordHistory(
+                    password = "local-only-password",
+                    lastUsedDate = REVISION_DATE,
+                ),
+            ),
+        )
+
+        val encoded = codec.encode(
+            local = local,
+            remote = remote,
+            existingBinaries = emptyMap(),
+        )
+
+        assertEquals(
+            listOf("historic-password", "remote-password"),
+            encoded.entry.history.map { it.fields.password?.content },
+        )
+        assertEquals(historicEntry, encoded.entry.history.first())
+        assertEquals(remote.copy(history = emptyList()), encoded.entry.history.last())
+    }
 
     @Test
     fun `encode preserves remote XML extensions on current and historical entries`() = runTest {
@@ -78,6 +269,103 @@ class KeePassCipherCodecTest {
         )
 
         assertEquals(cipherId, encoded.entry.uuid.toString())
+    }
+
+}
+
+class KeePassCipherCodecAttachmentTest {
+
+    @Test
+    fun `decode preserves compressed text and raw gzip with the same stored bytes`() = runTest {
+        val text = "compressed text attachment".encodeToByteArray()
+        val compressed = BinaryData.Uncompressed(false, text).toCompressed()
+        val raw = BinaryData.Uncompressed(false, compressed.rawContent)
+        val attachments = listOf(
+            remoteAttachment("text-id", "document.txt", text),
+            remoteAttachment("gzip-id", "document.txt.gz", raw.getContent()),
+        )
+        val remote = buildEntry().copy(
+            binaries = listOf(
+                BinaryReference(compressed.hash, "document.txt"),
+                BinaryReference(raw.hash, "document.txt.gz"),
+            ),
+        )
+        val local = testBitwardenCipher(cipherId = remote.uuid.toString()).copy(
+            attachments = attachments,
+        )
+
+        for (binaries in listOf(listOf(compressed, raw), listOf(raw, compressed))) {
+            val decoded = createCodec().decode(
+                accountId = local.accountId,
+                folderId = null,
+                cipherId = local.cipherId,
+                remote = remote,
+                local = local,
+                revisionDate = REVISION_DATE,
+                binaries = binaries.associateBy { it.hash },
+            )
+
+            // Existing IDs and hashref URLs belong to logical contents, while
+            // KDBX references use the distinct storage identities.
+            assertEquals(attachments, decoded.attachments)
+        }
+    }
+
+    @Test
+    fun `encode keeps compressed text when uploading its raw gzip bytes`() = runTest {
+        val text = "compressed text attachment".encodeToByteArray()
+        val compressed = BinaryData.Uncompressed(false, text).toCompressed()
+        val gzip = compressed.rawContent
+        val existingAttachment = remoteAttachment("text-id", "document.txt", text)
+        val pendingUpload = PendingUploadFile(
+            path = "/private/pending/document.txt.gz",
+            plainSize = gzip.size.toLong(),
+            encryptedSize = gzip.size.toLong() + 49L,
+        )
+        val staged = stagedAttachmentCipher(
+            pendingUpload = pendingUpload,
+            attachmentKey = "attachment-key".encodeToByteArray(),
+        )
+        val upload = (staged.attachments.single() as BitwardenCipher.Attachment.Local).copy(
+            fileName = "document.txt.gz",
+        )
+        val local = staged.copy(attachments = listOf(existingAttachment, upload))
+        val remote = buildEntry().copy(
+            binaries = listOf(BinaryReference(compressed.hash, existingAttachment.fileName)),
+        )
+        val existingBinaries = mapOf(compressed.hash to compressed)
+        val codec = createCodec(ReadingPendingUploadCoordinator(gzip))
+
+        val encoded = codec.encode(
+            local = local,
+            remote = remote,
+            existingBinaries = existingBinaries,
+        )
+
+        val expectedAttachments = listOf(
+            existingAttachment,
+            remoteAttachment(upload.id, upload.fileName, gzip),
+        )
+        val binaries = existingBinaries + encoded.binaryAdditions
+        assertEquals(expectedAttachments, encoded.attachments)
+        assertEquals(1, encoded.binaryAdditions.size)
+        assertEquals(2, binaries.size)
+        assertEquals(expectedAttachments.map { it.fileName }, encoded.entry.binaries.map { it.name })
+        val references = encoded.entry.binaries.associateBy { it.name }
+        assertEquals(compressed.hash, references.getValue("document.txt").hash)
+        assertContentEquals(text, binaries.getValue(references.getValue("document.txt").hash).getContent())
+        assertContentEquals(gzip, binaries.getValue(references.getValue("document.txt.gz").hash).getContent())
+
+        val decoded = codec.decode(
+            accountId = local.accountId,
+            folderId = null,
+            cipherId = local.cipherId,
+            remote = encoded.entry,
+            local = local.copy(attachments = encoded.attachments),
+            revisionDate = REVISION_DATE,
+            binaries = binaries,
+        )
+        assertEquals(expectedAttachments, decoded.attachments)
     }
 
     @Test
@@ -164,6 +452,27 @@ class KeePassCipherCodecTest {
         assertKeyCleared(pendingUploadCoordinator.readFileKeyRefs.single())
     }
 
+    private fun remoteAttachment(
+        id: String,
+        name: String,
+        content: ByteArray,
+    ): BitwardenCipher.Attachment.Remote {
+        val hash = AttachmentCryptoGenerator.hashSha256(content)
+        val encodedHash = testBase32Service.encodeToString(hash).trimEnd('=')
+        return BitwardenCipher.Attachment.Remote(
+            id = id,
+            url = "hashref://$encodedHash",
+            fileName = name,
+            keyBase64 = "",
+            size = content.size.toLong(),
+        )
+    }
+
+}
+
+class KeePassCipherCodecLinkTest {
+    private val codec = createCodec()
+
     @Test
     fun `decode collapses duplicate cipher links by canonical target`() = runTest {
         val remote = buildEntry(
@@ -194,20 +503,21 @@ class KeePassCipherCodecTest {
         assertEquals(emptyList(), decoded.fields)
     }
 
-    private fun createCodec(
-        pendingUploadCoordinator: PendingUploadCoordinator = FailingPendingUploadCoordinator,
-    ) = KeePassCipherCodec(
-        cryptoGenerator = AttachmentCryptoGenerator,
-        base32Service = testBase32Service,
-        base64Service = testBase64Service,
-        fileService = UploadTestUnusedFileService,
-        pendingUploadCoordinator = pendingUploadCoordinator,
-        getPasswordStrength = UploadTestPasswordStrength,
-        json = testJson,
-    )
 }
 
+private fun createCodec(
+    pendingUploadCoordinator: PendingUploadCoordinator = FailingPendingUploadCoordinator,
+    getPasswordStrength: GetPasswordStrength = UploadTestPasswordStrength,
+    gpgKeyMetadataResolver: GpgKeyMetadataResolver? = null,
+) = createTestCipherCodec(
+    cryptoGenerator = AttachmentCryptoGenerator,
+    pendingUploadCoordinator = pendingUploadCoordinator,
+    getPasswordStrength = getPasswordStrength,
+    gpgKeyMetadataResolver = gpgKeyMetadataResolver,
+)
+
 private const val TARGET_REMOTE_ID = "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12"
+private val REVISION_DATE = Instant.parse("2024-01-01T00:00:00Z")
 
 private fun stagedAttachmentCipher(
     pendingUpload: PendingUploadFile,

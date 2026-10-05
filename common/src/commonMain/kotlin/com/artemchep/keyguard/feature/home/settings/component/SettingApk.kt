@@ -5,23 +5,23 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import com.artemchep.keyguard.URL_GITHUB
 import com.artemchep.keyguard.common.usecase.GetPurchased
 import com.artemchep.keyguard.feature.home.settings.KgAction
 import com.artemchep.keyguard.feature.home.settings.LocalSettingPaneComponents
 import com.artemchep.keyguard.feature.navigation.LocalNavigationController
 import com.artemchep.keyguard.feature.navigation.NavigationIntent
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.icons.ChevronIcon
 import kotlinx.coroutines.flow.map
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
+import org.koin.core.scope.Scope
 
 fun settingApkProvider(
-    directDI: DirectDI,
+    koinScope: Scope,
 ) = settingApkProvider(
-    getPurchased = directDI.instance(),
+    getPurchased = koinScope.get(),
 )
 
 fun settingApkProvider(
@@ -58,7 +58,7 @@ private fun SettingApk() {
         onClick = {
             val intent = run {
                 val url =
-                    "https://github.com/AChep/keyguard-app/releases"
+                    "$URL_GITHUB/releases"
                 NavigationIntent.NavigateToBrowser(url)
             }
             controller.queue(intent)

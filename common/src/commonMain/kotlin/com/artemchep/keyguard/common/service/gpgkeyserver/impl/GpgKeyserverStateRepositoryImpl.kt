@@ -5,8 +5,10 @@ import com.artemchep.keyguard.common.io.effectMap
 import com.artemchep.keyguard.common.model.DGpgKeyserverState
 import com.artemchep.keyguard.common.service.database.DatabaseDispatcher
 import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
-import com.artemchep.keyguard.common.service.gpgkeyserver.GpgKeyserverStateRepository
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
+import com.artemchep.keyguard.common.service.gpgkeyserver.GpgKeyserverLocalKey
+import com.artemchep.keyguard.common.service.gpgkeyserver.GpgKeyserverStateRepository
+import com.artemchep.keyguard.common.service.gpgkeyserver.gpgKeyserverLocalKey
 import com.artemchep.keyguard.common.util.sqldelight.flatMapQueryToList
 import com.artemchep.keyguard.common.util.sqldelight.flatMapQueryToOneOrNull
 import com.artemchep.keyguard.data.GpgKeyserverState
@@ -14,8 +16,6 @@ import com.artemchep.keyguard.data.GpgKeyserverStateQueries
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 
 class GpgKeyserverStateRepositoryImpl(
     private val databaseManager: VaultDatabaseManager,
@@ -24,13 +24,6 @@ class GpgKeyserverStateRepositoryImpl(
     companion object {
         private const val TAG = "GpgKeyserverStateRepository"
     }
-
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        databaseManager = directDI.instance(),
-        dispatcher = directDI.instance(tag = DatabaseDispatcher),
-    )
 
     override fun getAll(): Flow<List<DGpgKeyserverState>> =
         daoEffect { dao ->
@@ -65,16 +58,35 @@ class GpgKeyserverStateRepositoryImpl(
         model: DGpgKeyserverState,
     ): IO<Unit> =
         databaseManager.mutate(TAG) { db ->
-            db.gpgKeyserverStateQueries.insertOrReplace(
-                fingerprint = model.fingerprint.normalizeGpgFingerprint(),
-                cipherId = model.cipherId,
-                verificationStatus = model.verificationStatus,
-                lastCheckedAt = model.lastCheckedAt,
-                lastRefreshedAt = model.lastRefreshedAt,
-                sourceKeyserver = model.sourceKeyserver,
-            )
+            db.gpgKeyserverStateQueries.put(model)
             Unit
         }
+
+    override fun update(
+        fingerprint: String,
+        transform: (DGpgKeyserverState?, List<GpgKeyserverLocalKey>) -> DGpgKeyserverState,
+    ): IO<DGpgKeyserverState> = databaseManager.mutate(TAG) { db ->
+        val normalized = fingerprint.normalizeGpgFingerprint()
+        db.transactionWithResult {
+            val current = db.gpgKeyserverStateQueries.getByFingerprint(normalized)
+                .executeAsOneOrNull()
+                ?.toDomain()
+            val keys = db.cipherQueries.get().executeAsList().mapNotNull { row ->
+                val cipher = row.data_
+                gpgKeyserverLocalKey(
+                    cipherId = cipher.cipherId,
+                    publicKeyArmored = cipher.gpgKey?.publicKeyArmored,
+                    fingerprint = cipher.gpgKey?.fingerprint,
+                    metadata = cipher.gpgKey?.metadata,
+                    legacyField = { name -> cipher.fields.firstOrNull { it.name == name }?.value },
+                )
+            }
+            val updated = transform(current, keys)
+            require(updated.fingerprint.normalizeGpgFingerprint() == normalized)
+            db.gpgKeyserverStateQueries.put(updated)
+            updated
+        }
+    }
 
     override fun removeByFingerprint(
         fingerprint: String,
@@ -103,7 +115,22 @@ private fun GpgKeyserverState.toDomain(): DGpgKeyserverState = DGpgKeyserverStat
     fingerprint = fingerprint,
     cipherId = cipherId,
     verificationStatus = verificationStatus,
+    publicationStatus = publicationStatus,
     lastCheckedAt = lastCheckedAt,
     lastRefreshedAt = lastRefreshedAt,
     sourceKeyserver = sourceKeyserver,
+    revocationEvidenceArmored = revocationEvidenceArmored,
+    hasUnbackedRevocation = hasUnbackedRevocation,
+)
+
+private fun GpgKeyserverStateQueries.put(model: DGpgKeyserverState) = insertOrReplace(
+    fingerprint = model.fingerprint.normalizeGpgFingerprint(),
+    cipherId = model.cipherId,
+    verificationStatus = model.verificationStatus,
+    publicationStatus = model.publicationStatus,
+    lastCheckedAt = model.lastCheckedAt,
+    lastRefreshedAt = model.lastRefreshedAt,
+    sourceKeyserver = model.sourceKeyserver,
+    revocationEvidenceArmored = model.revocationEvidenceArmored,
+    hasUnbackedRevocation = model.hasUnbackedRevocation,
 )

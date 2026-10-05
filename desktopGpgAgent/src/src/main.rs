@@ -30,7 +30,11 @@ struct Args {
     #[arg(long)]
     gpg_socket: Option<PathBuf>,
 
-    /// Enable verbose logging.
+    /// Stable private lifecycle lock directory for a sandboxed Unix host.
+    #[arg(long)]
+    lifecycle_lock_dir: Option<PathBuf>,
+
+    /// Enable debug logging. Otherwise RUST_LOG applies, defaulting to warnings and errors.
     #[arg(long, short)]
     verbose: bool,
 }
@@ -91,16 +95,32 @@ fn zeroize_string(buf: &mut String) {
     buf.clear();
 }
 
+fn write_startup_ready_record() -> Result<()> {
+    let stdout = std::io::stdout();
+    keyguard_agent_identity::write_startup_ready_record_to(stdout.lock())
+        .context("failed to write GPG agent startup readiness record")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    #[cfg(windows)]
+    if args.lifecycle_lock_dir.is_some() {
+        anyhow::bail!("--lifecycle-lock-dir is only supported on Unix");
+    }
 
+    // Keep routine activity out of logs in every build unless explicitly enabled.
     let filter = if args.verbose {
         EnvFilter::new("debug")
     } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
     };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // Stdout is reserved for the machine-readable startup handshake consumed
+    // by the desktop app. Keep all human-readable tracing on stderr.
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
     info!("keyguard-gpg-agent starting");
 
     let mut auth_token = {
@@ -134,12 +154,18 @@ async fn main() -> Result<()> {
     let ipc_client = ipc_client?;
     info!("authenticated with Keyguard IPC server");
 
-    socket::serve(ipc_client, &gpg_socket_path, parent_stdin_closed)
-        .await
-        .map_err(|e| {
-            error!("GPG agent server failed: {e}");
-            e
-        })?;
+    socket::serve(
+        ipc_client,
+        &gpg_socket_path,
+        args.lifecycle_lock_dir.as_deref(),
+        parent_stdin_closed,
+        write_startup_ready_record,
+    )
+    .await
+    .map_err(|e| {
+        error!("GPG agent server failed: {e}");
+        e
+    })?;
 
     Ok(())
 }
@@ -152,15 +178,44 @@ fn resolve_gpg_socket_path(configured: Option<PathBuf>) -> Result<PathBuf> {
 
     #[cfg(unix)]
     {
-        Ok(configured.unwrap_or_else(config::default_gpg_agent_socket_path))
+        match configured {
+            Some(socket_path) => Ok(socket_path),
+            None => config::default_gpg_agent_socket_path()
+                .context("failed to resolve the default GPG agent socket"),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::decode_auth_token_from_stdin_line;
-    #[cfg(windows)]
+    #[cfg(any(unix, windows))]
     use super::resolve_gpg_socket_path;
+    #[cfg(unix)]
+    use std::path::PathBuf;
+
+    #[test]
+    fn lifecycle_lock_directory_is_opt_in() {
+        use clap::Parser;
+        let base = [
+            "keyguard-gpg-agent",
+            "--ipc-socket",
+            "/tmp/test-ipc",
+            "--parent-pid",
+            "123",
+        ];
+        let defaults = super::Args::try_parse_from(base).expect("default arguments");
+        assert!(defaults.lifecycle_lock_dir.is_none());
+        let configured = super::Args::try_parse_from(
+            base.into_iter()
+                .chain(["--lifecycle-lock-dir", "/private/app-group/gpg/locks"]),
+        )
+        .expect("sandbox arguments");
+        assert_eq!(
+            configured.lifecycle_lock_dir.as_deref(),
+            Some(std::path::Path::new("/private/app-group/gpg/locks"))
+        );
+    }
 
     #[test]
     fn auth_token_rejects_wrong_length() {
@@ -174,6 +229,17 @@ mod tests {
     fn auth_token_accepts_32_bytes() {
         let token = decode_auth_token_from_stdin_line(&"ab".repeat(32)).unwrap();
         assert_eq!(token.len(), 32);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_unix_gpg_socket_bypasses_default_resolution() {
+        let configured = PathBuf::from("/tmp/keyguard-explicit-gpg.sock");
+
+        assert_eq!(
+            resolve_gpg_socket_path(Some(configured.clone())).unwrap(),
+            configured
+        );
     }
 
     #[cfg(windows)]

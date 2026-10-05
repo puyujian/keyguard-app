@@ -26,7 +26,6 @@ import app.keemobile.kotpass.xml.visitXmlBinaryContents
 import okio.Buffer
 import okio.BufferedSource
 import okio.ByteString
-import okio.ByteString.Companion.toByteString
 import okio.Source
 import okio.Timeout
 import okio.buffer
@@ -91,12 +90,13 @@ private fun KeePassDatabase.Companion.visitBinaryContentsSource(
     checkCancellation: () -> Unit,
 ) {
     val headerBuffer = Buffer()
-    val source = input.teeBufferStream(headerBuffer)
+    val headerSource = input.teeBufferStream(headerBuffer)
     try {
-        val header = DatabaseHeader.readFrom(source)
+        val header = DatabaseHeader.readFrom(headerSource)
         validateHeader(header)
 
         val rawHeaderData = headerBuffer.snapshot()
+        val source = headerSource.finishCapture()
         val transformedKey = KeyTransform.transformedKey(kdfProvider, header, credentials)
         val cipher = resolveCipher(header, cipherProviders)
         val masterSeed = header.masterSeed.toByteArray()
@@ -137,7 +137,7 @@ private fun KeePassDatabase.Companion.visitBinaryContentsSource(
     } catch (error: Exception) {
         throw error.toBinaryInspectError()
     } finally {
-        source.close()
+        headerSource.close()
     }
 }
 
@@ -187,20 +187,20 @@ private fun visitBinaryContentsVer3x(
             header.innerRandomStreamId,
             header.innerRandomStreamKey,
         )
-        val headerHash = try {
-            visitXmlBinaryContents(
-                source = contentSource,
+        contentSource.use { plaintext ->
+            val headerHash = visitXmlBinaryContents(
+                source = plaintext,
                 innerEncryption = saltGenerator,
                 visitor = XmlBinaryContentVisitor(visitor::visit),
                 checkCancellation = checkCancellation,
-            ).also {
-                contentSource.drainAndVerify()
+            )
+            plaintext.drainAndVerify()
+            if (validateHashes && headerHash != null && headerHash != rawHeaderData.sha256()) {
+                throw FormatError.InvalidHeader("HeaderHash value does not match Sha256 of the header.")
             }
-        } finally {
-            contentSource.close()
-        }
-        if (validateHashes && headerHash != null && headerHash != rawHeaderData.sha256()) {
-            throw FormatError.InvalidHeader("HeaderHash value does not match Sha256 of the header.")
+            // The terminal plaintext block does not end the enclosing cipher.
+            // Consume its remaining bytes and validate padding before closing it.
+            decryptedSource.drainAndVerify()
         }
     }
 }
@@ -218,21 +218,7 @@ private fun visitBinaryContentsVer4x(
     limits: KdbxReadLimits,
     checkCancellation: () -> Unit,
 ) {
-    val expectedSha256 = source.readByteString(32)
-    val expectedHmacSha256 = source.readByteString(32)
-    if (validateHashes) {
-        if (rawHeaderData.sha256() != expectedSha256) {
-            throw FormatError.InvalidHeader("Header's Sha256 does not match.")
-        }
-        val hmacKey = KeyTransform.hmacKey(masterSeed, transformedKey)
-        try {
-            if (rawHeaderData.hmacSha256(hmacKey.toByteString()) != expectedHmacSha256) {
-                throw CryptoError.InvalidKey("Wrong key used for decryption.")
-            }
-        } finally {
-            hmacKey.fill(0)
-        }
-    }
+    authenticateVer4Header(source, rawHeaderData, validateHashes, masterSeed, transformedKey)
 
     val blocks = ContentBlocks.ver4Source(
         source = source,

@@ -1,9 +1,9 @@
 package com.artemchep.keyguard.feature.gpgagent.keyserver.search
 
-import androidx.compose.runtime.Composable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.runtime.Composable
 import arrow.core.Either
 import com.artemchep.keyguard.common.io.attempt
 import com.artemchep.keyguard.common.io.bind
@@ -14,7 +14,8 @@ import com.artemchep.keyguard.common.model.GpgKeyserverConfig
 import com.artemchep.keyguard.common.model.Loadable
 import com.artemchep.keyguard.common.model.SearchGpgPublicKeyRequest
 import com.artemchep.keyguard.common.model.ToastMessage
-import com.artemchep.keyguard.common.model.toGpgAgentKeyMetadataOrNull
+import com.artemchep.keyguard.common.service.crypto.GpgKeyMetadataResolver
+import com.artemchep.keyguard.common.service.crypto.resolveDownloadedGpgKeyMetadata
 import com.artemchep.keyguard.common.service.gpgagent.chunkedGpgFingerprint
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
 import com.artemchep.keyguard.common.usecase.CopyText
@@ -32,8 +33,8 @@ import com.artemchep.keyguard.feature.search.search.debounceSearch
 import com.artemchep.keyguard.feature.search.search.mapListShape
 import com.artemchep.keyguard.feature.search.search.searchFilter
 import com.artemchep.keyguard.feature.search.search.searchQueryHandle
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.FlatItemAction
 import com.artemchep.keyguard.ui.buildContextItems
 import com.artemchep.keyguard.ui.icons.icon
@@ -42,15 +43,14 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
-import org.kodein.di.instance
+import org.koin.compose.currentKoinScope
 
 @Composable
-fun produceGpgKeyserverSearchState() = with(localDI().direct) {
+fun produceGpgKeyserverSearchState() = with(currentKoinScope()) {
     produceGpgKeyserverSearchState(
-        getGpgKeyserverConfig = instance(),
-        searchGpgPublicKey = instance(),
+        getGpgKeyserverConfig = get(),
+        searchGpgPublicKey = get(),
+        gpgKeyMetadataResolver = get(),
     )
 }
 
@@ -58,12 +58,14 @@ fun produceGpgKeyserverSearchState() = with(localDI().direct) {
 fun produceGpgKeyserverSearchState(
     getGpgKeyserverConfig: GetGpgKeyserverConfig,
     searchGpgPublicKey: SearchGpgPublicKey,
+    gpgKeyMetadataResolver: GpgKeyMetadataResolver,
 ): Loadable<GpgKeyserverSearchState> = produceScreenState(
     key = "gpg_keyserver_search",
     initial = Loadable.Loading,
     args = arrayOf(
         getGpgKeyserverConfig,
         searchGpgPublicKey,
+        gpgKeyMetadataResolver,
     ),
 ) {
     val configFlow = getGpgKeyserverConfig()
@@ -108,6 +110,7 @@ fun produceGpgKeyserverSearchState(
                                     result = result,
                                     copyText = copyText,
                                     searchGpgPublicKey = searchGpgPublicKey,
+                                    gpgKeyMetadataResolver = gpgKeyMetadataResolver,
                                 )
                             }
                             .mapListShape()
@@ -137,6 +140,7 @@ private fun RememberStateFlowScope.toItem(
     result: DGpgKeyserverResult,
     copyText: CopyText,
     searchGpgPublicKey: SearchGpgPublicKey,
+    gpgKeyMetadataResolver: GpgKeyMetadataResolver,
 ): GpgKeyserverSearchState.Item.Content {
     val fingerprint = result.fingerprint.normalizeGpgFingerprint()
     val title = result.displayTitle()
@@ -179,6 +183,7 @@ private fun RememberStateFlowScope.toItem(
                         createGpgKeyItem(
                             result = result,
                             searchGpgPublicKey = searchGpgPublicKey,
+                            gpgKeyMetadataResolver = gpgKeyMetadataResolver,
                         )
                     },
                 )
@@ -224,11 +229,16 @@ private suspend fun RememberStateFlowScope.withResolvedPublicKey(
 private suspend fun RememberStateFlowScope.createGpgKeyItem(
     result: DGpgKeyserverResult,
     searchGpgPublicKey: SearchGpgPublicKey,
+    gpgKeyMetadataResolver: GpgKeyMetadataResolver,
 ) = withResolvedPublicKey(
     result = result,
     searchGpgPublicKey = searchGpgPublicKey,
 ) { publicKeyArmored ->
     val fingerprint = result.fingerprint.normalizeGpgFingerprint()
+    val metadata = gpgKeyMetadataResolver.resolveDownloadedGpgKeyMetadata(
+        publicKeyArmored = publicKeyArmored,
+        fingerprint = fingerprint,
+    )
     val title = result.displayTitle()
     val route = LeAddRoute(
         args = AddRoute.Args(
@@ -237,7 +247,7 @@ private suspend fun RememberStateFlowScope.createGpgKeyItem(
             gpgKeyValue = DSecret.GpgKey(
                 publicKeyArmored = publicKeyArmored,
                 fingerprint = fingerprint.takeIf { it.isNotBlank() },
-                metadata = result.toGpgAgentKeyMetadataOrNull(),
+                metadata = metadata,
             ),
         ),
     )

@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.autofill.contentType
@@ -55,8 +56,8 @@ import com.artemchep.keyguard.feature.yubikey.YubiKeyPromptEffect
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.platform.LocalWindowRev
 import com.artemchep.keyguard.platform.Platform
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.ExpandedIfNotEmpty
 import com.artemchep.keyguard.ui.KeyguardLoadingIndicator
 import com.artemchep.keyguard.ui.MediumEmphasisAlpha
@@ -71,13 +72,11 @@ import com.artemchep.keyguard.ui.skeleton.SkeletonButton
 import com.artemchep.keyguard.ui.skeleton.SkeletonTextField
 import com.artemchep.keyguard.ui.theme.Dimens
 import com.artemchep.keyguard.ui.theme.combineAlpha
-import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
-import org.kodein.di.instance
-import kotlin.time.Duration.Companion.milliseconds
+import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.currentKoinScope
 
 val unlockScreenTitlePadding = 24.dp
 val unlockScreenActionPadding = 8.dp
@@ -92,13 +91,15 @@ fun UnlockScreen(
     unlockVaultByBiometric: VaultState.Unlock.WithBiometric?,
     unlockVaultByYubiKey: VaultState.Unlock.WithYubiKey?,
     lockInfo: VaultState.Unlock.LockInfo?,
+    unlockVaultByFido2: VaultState.Unlock.WithFido2? = null,
 ) {
     val loadableState = unlockScreenState(
-        clearData = localDI().direct.instance(),
+        clearData = currentKoinScope().get(),
         unlockVaultByMasterPassword = unlockVaultByMasterPassword,
         unlockVaultByBiometric = unlockVaultByBiometric,
         unlockVaultByYubiKey = unlockVaultByYubiKey,
         lockInfo = lockInfo,
+        unlockVaultByFido2 = unlockVaultByFido2,
     )
     when (LocalAuthScreen.current.style) {
         AuthScreen.Style.FULL_SCREEN -> {
@@ -170,6 +171,7 @@ fun UnlockDialog(
 
     BiometricPromptEffect(unlockState.sideEffects.showBiometricPromptFlow)
     YubiKeyPromptEffect(unlockState.sideEffects.showYubiKeyPromptFlow)
+    com.artemchep.keyguard.feature.fido2.Fido2PromptEffect(unlockState.sideEffects.showFido2PromptFlow)
 
     val infoOrNull = LocalAuthScreen.current.reason
         ?: unlockState.lockReason
@@ -292,6 +294,7 @@ private fun UnlockScreen(
 
     BiometricPromptEffect(unlockState.sideEffects.showBiometricPromptFlow)
     YubiKeyPromptEffect(unlockState.sideEffects.showYubiKeyPromptFlow)
+    com.artemchep.keyguard.feature.fido2.Fido2PromptEffect(unlockState.sideEffects.showFido2PromptFlow)
     OtherScaffold(
         actions = {
             OptionsButton(actions = unlockState.actions)
@@ -348,7 +351,7 @@ private fun rememberFocusRequesterAndAutoRequest(
     }
 
     val updatedHasHardwareUnlock by rememberUpdatedState(
-        unlockState.biometric != null || unlockState.yubiKey != null,
+        unlockState.biometric != null || unlockState.yubiKey != null || unlockState.fido2 != null,
     )
     LaunchedEffect(focusRequester, windowRev) {
         val delayMs = if (CurrentPlatform is Platform.Mobile) {
@@ -478,15 +481,17 @@ private fun ExpandedHardwareUnlockIfExists(
 ) {
     ExpandedIfNotEmpty(
         valueOrNull = Unit.takeIf {
-            unlockState.biometric != null || unlockState.yubiKey != null
+            unlockState.biometric != null || unlockState.yubiKey != null || unlockState.fido2 != null
         },
     ) {
         val onBiometricButtonClick by rememberUpdatedState(unlockState.biometric?.onClick)
         val onYubiKeyButtonClick by rememberUpdatedState(unlockState.yubiKey?.onClick)
+        val onFido2ButtonClick by rememberUpdatedState(unlockState.fido2?.onClick)
         Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .padding(top = 32.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         ) {
             if (unlockState.biometric != null) {
                 Button(
@@ -505,6 +510,12 @@ private fun ExpandedHardwareUnlockIfExists(
                         contentDescription = null,
                     )
                 }
+            }
+            if (unlockState.fido2 != null) {
+                Fido2UnlockButton(
+                    enabled = unlockState.fido2.onClick != null,
+                    onClick = { onFido2ButtonClick?.invoke() },
+                )
             }
             if (unlockState.yubiKey != null) {
                 Button(

@@ -1,17 +1,6 @@
-import dev.detekt.gradle.extensions.DetektExtension
-import dev.detekt.gradle.extensions.FailOnSeverity
 import org.gradle.buildconfiguration.tasks.UpdateDaemonJvm
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JvmVendorSpec
-
-// Top-level build file where you can add configuration options common
-// to all sub-projects/modules.
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
 
 // This is necessary to avoid the plugins to be loaded multiple times
 // in each subproject's classloader.
@@ -22,9 +11,7 @@ plugins {
     alias(libs.plugins.android.test) apply false
     alias(libs.plugins.baseline.profile) apply false
     alias(libs.plugins.kotlin.multiplatform) apply false
-    alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.jvm) apply false
-    alias(libs.plugins.kotlin.kapt) apply false
     alias(libs.plugins.kotlin.plugin.compose) apply false
     alias(libs.plugins.kotlin.plugin.parcelize) apply false
     alias(libs.plugins.kotlin.plugin.serialization) apply false
@@ -39,6 +26,7 @@ plugins {
     alias(libs.plugins.license.check) apply false
     alias(libs.plugins.versions) apply true
     alias(libs.plugins.version.catalog.update) apply true
+    id("keyguard.ktlint")
     id("keyguard.crypto-dependency-policy")
 }
 
@@ -50,154 +38,170 @@ tasks.named<UpdateDaemonJvm>("updateDaemonJvm") {
     vendor = JvmVendorSpec.JETBRAINS
 }
 
-subprojects {
-    // The custom rules live here, so this module can not be a Detekt consumer of itself.
-    if (path == ":detektRules") {
-        return@subprojects
+// Xcode reads this committed configuration before running any build scripts.
+// Regenerate it when appVersionName changes; CI checks it without rewriting it.
+val appleVersionConfig = layout.projectDirectory.file("xcode/Version.xcconfig")
+val appleVersionConfigContent =
+    libs.versions.appVersionName.map { version ->
+        require(version.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+"))) {
+            "Apple marketing versions must use major.minor.patch; appVersionName is '$version'."
+        }
+        "// Generated from gradle/libs.versions.toml. Do not edit.\n" +
+            "// Regenerate with ./gradlew generateAppleVersion.\n" +
+            "MARKETING_VERSION = $version\n"
     }
 
-    apply(plugin = rootProject.libs.plugins.detekt.get().pluginId)
-
-    // Makes the `keyguard` rule set a known config key everywhere. The rules that need type
-    // resolution stay inactive on these tasks and are enabled only by the dedicated tasks; see
-    // the `keyguard.detekt-custom-rules` convention plugin.
-    dependencies {
-        add("detektPlugins", project(":detektRules"))
+tasks.register("generateAppleVersion") {
+    group = "build setup"
+    description = "Updates the shared Apple marketing version from the version catalog."
+    val config = appleVersionConfig
+    val content = appleVersionConfigContent
+    inputs.property("content", content)
+    outputs.file(config)
+    doLast {
+        config.asFile.writeText(content.get())
     }
+}
 
-    configure<DetektExtension> {
-        toolVersion.set(rootProject.libs.versions.detekt)
-        source.setFrom(
-            fileTree("src") {
-                include("**/*.kt")
-                include("**/*.kts")
-            },
-        )
-        config.setFrom(rootProject.layout.projectDirectory.file("config/detekt/detekt.yml"))
-        buildUponDefaultConfig.set(true)
-        baseline.set(
-            rootProject.layout.projectDirectory.file(
-                "config/detekt/baseline/${path.removePrefix(":").replace(':', '-')}.xml",
-            ),
-        )
-        basePath.set(rootProject.layout.projectDirectory)
-        ignoreFailures.set(false)
-        failOnSeverity.set(FailOnSeverity.Error)
-    }
-
-    if (
-        name == "androidApp" ||
-        name == "wearApp" ||
-        name == "desktopApp"
-    ) {
-        apply(plugin = rootProject.libs.plugins.license.check.get().pluginId)
-
-        configure<app.cash.licensee.LicenseeExtension> {
-            allow("Apache-2.0")
-            allow("MIT")
-            allow("EPL-1.0")
-            allow("EPL-2.0")
-            allow("CC0-1.0")
-            allow("BSD-2-Clause")
-            allow("BSD-3-Clause")
-
-            //
-            // Android
-            //
-
-            allowUrl("https://developer.android.com/studio/terms.html") {
-                because("Android Developers")
-            }
-            allowUrl("https://developer.android.com/guide/playcore/license") {
-                because("Android Developers")
-            }
-            allowUrl("https://developers.google.com/ml-kit/terms") {
-                because("Google Developers")
-            }
-
-            //
-            // Self-hosted
-            //
-
-            allowUrl("https://opensource.org/license/mit") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/devsrsouza/compose-icons/blob/master/LICENSE") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://spdx.org/licenses/MIT.txt") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://opensource.org/licenses/MIT") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://opensource.org/licenses/mit-license.php") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/vinceglb/FileKit/blob/main/LICENSE") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/hypfvieh/dbus-java/blob/master/LICENSE") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/icerockdev/moko-resources/blob/master/LICENSE.md") {
-                because("Apache License-2.0, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/icerockdev/moko-graphics/blob/master/LICENSE.md") {
-                because("Apache License-2.0, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/icerockdev/moko-parcelize/blob/master/LICENSE.md") {
-                because("Apache License-2.0, but self-hosted copy of the license")
-            }
-            allowUrl("https://github.com/WonderzGmbH/nativefiledialog-java/blob/master/LICENSE") {
-                because("zlib License, but self-hosted copy of the license")
-            }
-            allowUrl("https://asm.ow2.io/license.html") {
-                because("3-Clause BSD License, but self-hosted copy of the license")
-            }
-            allowDependency("com.github.AChep", "bindin", "1.4.0") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowDependency("com.mayakapps.compose", "window-styler", "0.3.2") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowDependency("com.mayakapps.compose", "window-styler-jvm", "0.3.2") {
-                because("MIT License, but self-hosted copy of the license")
-            }
-            allowDependency("commons-logging", "commons-logging", "1.0.4") {
-                because("Apache License-2.0, but self-hosted copy of the license")
-            }
-            allowDependency("com.github.spotbugs", "spotbugs-annotations", "4.9.8") {
-                because("Static code analysis")
-            }
-            allowDependency("com.github.jai-imageio", "jai-imageio-core", "1.4.0") {
-                // https://github.com/jai-imageio/jai-imageio-core/blob/master/LICENSE.txt
-                because("Sun Microsystems, Inc")
-            }
-            allowDependency("com.ibm.icu", "icu4j", "73.1") {
-                because("UNICODE LICENSE V3")
-            }
-            allowDependency("com.ibm.icu", "icu4j", "75.1") {
-                because("UNICODE LICENSE V3")
-            }
-
-            //
-            // Other
-            //
-
-            allowUrl("https://www.zetetic.net/sqlcipher/license/") {
-                because("BDS-like License")
-            }
+tasks.register("checkAppleVersion") {
+    group = "verification"
+    description = "Checks that the committed Apple marketing version matches the version catalog."
+    // Order an explicitly requested generation first, but never regenerate during a check.
+    mustRunAfter("generateAppleVersion")
+    val config = appleVersionConfig
+    val content = appleVersionConfigContent
+    inputs.files(config).withPathSensitivity(PathSensitivity.NONE)
+    inputs.property("content", content)
+    doLast {
+        check(config.asFile.isFile && config.asFile.readText() == content.get()) {
+            "xcode/Version.xcconfig is missing or stale. Run ./gradlew generateAppleVersion " +
+                "and commit the updated file."
         }
     }
 }
 
-allprojects {
-    apply(plugin = rootProject.libs.plugins.ktlint.get().pluginId)
-
-    configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
-        version.set(rootProject.libs.versions.ktlint.get())
+fun validateAppleDeploymentTarget(
+    name: String,
+    version: String,
+): String {
+    require(version.matches(Regex("[0-9]+\\.[0-9]+"))) {
+        "Apple deployment targets must use major.minor; $name is '$version'."
     }
+    return version
+}
+
+fun appleDeploymentConfigContent(
+    macosVersion: String,
+    iosVersion: String,
+): String {
+    val macos = validateAppleDeploymentTarget("appleMacosDeploymentTarget", macosVersion)
+    val ios = validateAppleDeploymentTarget("appleIosDeploymentTarget", iosVersion)
+    return "// Generated from gradle/libs.versions.toml. Do not edit.\n" +
+        "// Regenerate with ./gradlew generateAppleConfiguration.\n" +
+        "MACOSX_DEPLOYMENT_TARGET = $macos\n" +
+        "IPHONEOS_DEPLOYMENT_TARGET = $ios\n"
+}
+
+fun updateSwiftPackageDeploymentTargets(
+    source: String,
+    macosVersion: String,
+    iosVersion: String,
+): String {
+    fun replaceSingle(
+        input: String,
+        pattern: Regex,
+        replacement: String,
+        platform: String,
+    ): String {
+        val matches = pattern.findAll(input).toList()
+        check(matches.size == 1) {
+            "Expected exactly one $platform platform declaration in appleUi/Package.swift, " +
+                "found ${matches.size}."
+        }
+        return input.replaceRange(matches.single().range, replacement)
+    }
+
+    val macos = validateAppleDeploymentTarget("appleMacosDeploymentTarget", macosVersion)
+    val ios = validateAppleDeploymentTarget("appleIosDeploymentTarget", iosVersion)
+    return replaceSingle(
+        input = source,
+        pattern = Regex("""\.macOS\("[^"]+"\)"""),
+        replacement = ".macOS(\"$macos\")",
+        platform = "macOS",
+    ).let { updated ->
+        replaceSingle(
+            input = updated,
+            pattern = Regex("""\.iOS\("[^"]+"\)"""),
+            replacement = ".iOS(\"$ios\")",
+            platform = "iOS",
+        )
+    }
+}
+
+val appleDeploymentConfig = layout.projectDirectory.file("xcode/DeploymentTargets.xcconfig")
+val appleUiPackageManifest = layout.projectDirectory.file("appleUi/Package.swift")
+val appleMacosDeploymentTarget = libs.versions.appleMacosDeploymentTarget
+val appleIosDeploymentTarget = libs.versions.appleIosDeploymentTarget
+
+tasks.register("generateAppleDeploymentTargets") {
+    group = "build setup"
+    description = "Updates Apple deployment targets from the version catalog."
+    val config = appleDeploymentConfig
+    val packageManifest = appleUiPackageManifest
+    val macosVersion = appleMacosDeploymentTarget
+    val iosVersion = appleIosDeploymentTarget
+    inputs.property("macosDeploymentTarget", macosVersion)
+    inputs.property("iosDeploymentTarget", iosVersion)
+    outputs.file(config)
+    outputs.file(packageManifest)
+    doLast {
+        val macos = macosVersion.get()
+        val ios = iosVersion.get()
+        config.asFile.writeText(appleDeploymentConfigContent(macos, ios))
+        val packageSource = packageManifest.asFile.readText()
+        packageManifest.asFile.writeText(
+            updateSwiftPackageDeploymentTargets(packageSource, macos, ios),
+        )
+    }
+}
+
+tasks.register("checkAppleDeploymentTargets") {
+    group = "verification"
+    description = "Checks Apple deployment targets against the version catalog."
+    mustRunAfter("generateAppleDeploymentTargets")
+    val config = appleDeploymentConfig
+    val packageManifest = appleUiPackageManifest
+    val macosVersion = appleMacosDeploymentTarget
+    val iosVersion = appleIosDeploymentTarget
+    inputs.files(config, packageManifest).withPathSensitivity(PathSensitivity.NONE)
+    inputs.property("macosDeploymentTarget", macosVersion)
+    inputs.property("iosDeploymentTarget", iosVersion)
+    doLast {
+        val macos = macosVersion.get()
+        val ios = iosVersion.get()
+        val expectedConfig = appleDeploymentConfigContent(macos, ios)
+        check(config.asFile.isFile && config.asFile.readText() == expectedConfig) {
+            "xcode/DeploymentTargets.xcconfig is missing or stale. Run " +
+                "./gradlew generateAppleConfiguration and commit the updated file."
+        }
+        val packageSource = packageManifest.asFile.readText()
+        check(packageSource == updateSwiftPackageDeploymentTargets(packageSource, macos, ios)) {
+            "appleUi/Package.swift has stale deployment targets. Run " +
+                "./gradlew generateAppleConfiguration and commit the updated file."
+        }
+    }
+}
+
+tasks.register("generateAppleConfiguration") {
+    group = "build setup"
+    description = "Updates generated Apple build configuration from the version catalog."
+    dependsOn("generateAppleVersion", "generateAppleDeploymentTargets")
+}
+
+tasks.register("checkAppleConfiguration") {
+    group = "verification"
+    description = "Checks generated Apple build configuration against the version catalog."
+    dependsOn("checkAppleVersion", "checkAppleDeploymentTargets")
 }
 
 //
@@ -209,14 +213,23 @@ allprojects {
 // `keyguard.detekt-custom-rules` and registering the compilations to analyse.
 //
 
-val customRuleModules = listOf(":common", ":wearApp")
+val customRuleModules = listOf(
+    ":androidLibAutofill",
+    ":common",
+    ":integration:androidIpcTestClient",
+    ":util:kdbx",
+    ":util:s3",
+    ":util:webdav",
+    ":wearApp",
+)
 
-// The APIs guarded by the custom rules. Each opted-in module repeats the ones it uses via
-// `requireCoverageFor(...)`; this list is the repository-wide view used by the ownership check.
-val guardedApiMarkers = listOf("mutablePersistedFlow")
+// The APIs guarded by the custom rules, shared with every opted-in module's coverage check.
+val guardedApiMarkers =
+    com.artemchep.keyguard.buildplugins.detekt.DetektCustomRulesPlugin.GUARDED_API_MARKERS
 
 // Catches a module that starts using a guarded API without opting into the custom-rule tasks.
-val verifyDetektCustomRulesOwnership by tasks.registering(
+val verifyDetektCustomRulesOwnership = tasks.register(
+    "verifyDetektCustomRulesOwnership",
     com.artemchep.keyguard.buildplugins.detekt.VerifyDetektMarkerCoverageTask::class,
 ) {
     group = "verification"

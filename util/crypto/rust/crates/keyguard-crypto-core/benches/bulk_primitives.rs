@@ -110,20 +110,20 @@ fn benchmark_bulk_primitives(c: &mut Criterion) {
     let openpgp_modern_keygen = openpgp_keygen_request(OpenPgpKeyKind::LegacyEd25519X25519, 0);
     let openpgp_rsa_3072_keygen = openpgp_keygen_request(OpenPgpKeyKind::Rsa, 3_072);
     let openpgp_modern_material = generate_openpgp_key_material(&openpgp_modern_keygen);
-    let openpgp_ocb_encrypt =
+    let openpgp_seipd_v2_encrypt =
         openpgp_encrypt_stream_request(&openpgp_modern_material.public_key_armored);
     let openpgp_mdc_encrypt = openpgp_encrypt_stream_request(OPENPGP_MDC_PUBLIC_KEY);
-    let openpgp_ocb_ciphertext = collect_openpgp_encryption(
-        &openpgp_ocb_encrypt,
+    let openpgp_seipd_v2_ciphertext = collect_openpgp_encryption(
+        &openpgp_seipd_v2_encrypt,
         &openpgp_payload,
-        OpenPgpProtectionMode::GnupgOcb,
+        OpenPgpProtectionMode::SeipdV2Aead,
     );
     let openpgp_mdc_ciphertext = collect_openpgp_encryption(
         &openpgp_mdc_encrypt,
         &openpgp_payload,
         OpenPgpProtectionMode::SeipdV1Mdc,
     );
-    let openpgp_ocb_decrypt =
+    let openpgp_seipd_v2_decrypt =
         openpgp_decrypt_stream_request(&openpgp_modern_material.private_key_armored);
     let openpgp_mdc_decrypt = openpgp_decrypt_stream_request(OPENPGP_MDC_SECRET_KEY);
 
@@ -148,20 +148,20 @@ fn benchmark_bulk_primitives(c: &mut Criterion) {
     c.bench_function("openpgp_rsa_3072_keygen", |bencher| {
         bencher.iter(|| run_openpgp_keygen(&openpgp_rsa_3072_keygen));
     });
-    c.bench_function("openpgp_ocb_encrypt_stream_8m_64k", |bencher| {
+    c.bench_function("openpgp_seipd_v2_encrypt_stream_8m_64k", |bencher| {
         bencher.iter(|| {
             run_openpgp_encryption(
-                &openpgp_ocb_encrypt,
+                &openpgp_seipd_v2_encrypt,
                 &openpgp_payload,
-                OpenPgpProtectionMode::GnupgOcb,
+                OpenPgpProtectionMode::SeipdV2Aead,
             )
         });
     });
-    c.bench_function("openpgp_ocb_decrypt_stream_8m_64k", |bencher| {
+    c.bench_function("openpgp_seipd_v2_decrypt_stream_8m_64k", |bencher| {
         bencher.iter(|| {
             run_openpgp_decryption(
-                &openpgp_ocb_decrypt,
-                &openpgp_ocb_ciphertext,
+                &openpgp_seipd_v2_decrypt,
+                &openpgp_seipd_v2_ciphertext,
                 &openpgp_payload,
             )
         });
@@ -212,6 +212,7 @@ fn openpgp_keygen_request(kind: OpenPgpKeyKind, rsa_bits: u32) -> Vec<u8> {
         protocol_version: PROTOCOL_VERSION,
         operation: Some(native_request::Operation::OpenPgpKeyGenerate(
             OpenPgpKeyGenerateRequest {
+                version: 0,
                 kind: kind as i32,
                 user_id: "Keyguard fixed-host benchmark <benchmark@test.invalid>".to_owned(),
                 rsa_bits,
@@ -234,6 +235,7 @@ fn openpgp_encrypt_stream_request(public_key: &[u8]) -> Vec<u8> {
             literal_time_epoch_seconds: Some(OPENPGP_REFERENCE_TIME - 1),
             reference_time_epoch_seconds: Some(OPENPGP_REFERENCE_TIME),
             enable_compression: None,
+            candidate_revocation_keys: Vec::new(),
         },
     ))
 }
@@ -241,6 +243,7 @@ fn openpgp_encrypt_stream_request(public_key: &[u8]) -> Vec<u8> {
 fn openpgp_decrypt_stream_request(private_key: &[u8]) -> Vec<u8> {
     stream_open_request(native_stream_open_request::Operation::OpenPgpDecrypt(
         OpenPgpDecryptStreamOpenRequest {
+            staging_directory: None,
             private_keys: vec![private_key.to_vec()],
             verification_public_keys: Vec::new(),
             reference_time_epoch_seconds: Some(OPENPGP_REFERENCE_TIME),

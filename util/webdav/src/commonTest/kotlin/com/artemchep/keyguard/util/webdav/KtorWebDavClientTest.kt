@@ -3,6 +3,7 @@ package com.artemchep.keyguard.util.webdav
 import com.artemchep.keyguard.util.io.artifact.KEYGUARD_TEMPORARY_ARTIFACT_PREFIX
 import com.artemchep.keyguard.util.io.artifact.TemporaryArtifactRole
 import com.artemchep.keyguard.util.io.artifact.temporaryArtifactName
+import io.ktor.client.plugins.cache.HttpCache
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -33,11 +34,29 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class KtorWebDavClientTest {
+    @Test
+    fun `stat reports malformed XML as a protocol error`() = runTest {
+        for (xml in listOf(
+            "<multistatus xmlns='DAV:'><response><href>/dav/root/object.kdbx</href>",
+            "<multistatus xmlns='DAV:'><response><href>/dav/root/a&unknown;</href></response></multistatus>",
+        )) {
+            val engine = MockEngine { respond(xml, status = MULTI_STATUS) }
+            val client = testClient(engine)
+
+            val error = assertFailsWith<WebDavException.Protocol> { client.stat("object.kdbx") }
+
+            assertEquals(WebDavOperation.Stat, error.operation)
+            assertEquals("object.kdbx", error.path)
+            assertTrue(error.cause is IllegalArgumentException)
+        }
+    }
+
     @Test
     fun `stat encodes path segments and parses DAV properties`() = runTest {
         val engine = MockEngine { request ->
@@ -67,6 +86,57 @@ class KtorWebDavClientTest {
         assertEquals(42L, resource.size)
         assertEquals(Instant.fromEpochSeconds(784903526L), resource.lastModified)
         assertEquals("\"abc\"", resource.etag)
+    }
+
+    @Test
+    fun `stat merges successful properties in response order`() = runTest {
+        val engine = MockEngine {
+            respond(
+                content = """
+                    <D:multistatus xmlns:D="DAV:">
+                        <D:response>
+                            <D:href>/dav/root/object.kdbx</D:href>
+                            <D:propstat>
+                                <D:prop><D:getcontentlength>1</D:getcontentlength></D:prop>
+                                <D:status>HTTP/1.1 200 OK</D:status>
+                            </D:propstat>
+                            <D:propstat>
+                                <D:prop><D:getcontentlength>2</D:getcontentlength></D:prop>
+                            </D:propstat>
+                            <D:propstat>
+                                <D:prop><D:getcontentlength>3</D:getcontentlength></D:prop>
+                                <D:status>HTTP/1.1 404 Not Found</D:status>
+                            </D:propstat>
+                        </D:response>
+                    </D:multistatus>
+                """.trimIndent(),
+                status = MULTI_STATUS,
+                headers = headersOf(HttpHeaders.ContentType, "application/xml"),
+            )
+        }
+
+        val resource = assertNotNull(testClient(engine).stat("object.kdbx"))
+
+        assertEquals(2L, resource.size)
+    }
+
+    @Test
+    fun `stat reports a too deeply nested multistatus as protocol error`() = runTest {
+        val depth = 20_000
+        val engine = MockEngine {
+            respond(
+                content = singleMultistatus(
+                    href = "/dav/root/object.kdbx",
+                    properties = "<D:x>".repeat(depth) + "</D:x>".repeat(depth),
+                ),
+                status = MULTI_STATUS,
+            )
+        }
+        val client = testClient(engine)
+
+        assertFailsWith<WebDavException.Protocol> {
+            client.stat("object.kdbx")
+        }
     }
 
     @Test
@@ -506,6 +576,185 @@ class KtorWebDavClientTest {
     }
 
     @Test
+    fun `write falls back to conditional PUT when MOVE is rejected with 409`() = runTest {
+        val payload = "payload".encodeToByteArray()
+        val objectPath = "/dav/root/object.zip"
+        var etag = "v1"
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            when (request.method.value) {
+                "PROPFIND" -> if (path.isTempPath()) {
+                    respondFileStat(path)
+                } else {
+                    respondEtagStat(objectPath, etag)
+                }
+                "PUT" -> if (path.isTempPath()) {
+                    respond("", status = HttpStatusCode.Created)
+                } else {
+                    assertEquals("\"v1\"", request.headers[HttpHeaders.IfMatch])
+                    assertContentEquals(payload, request.body.asBytes())
+                    etag = "v2"
+                    respond("", status = HttpStatusCode.NoContent)
+                }
+                "MOVE" -> respond("", status = HttpStatusCode.Conflict)
+                "DELETE" -> {
+                    assertTrue(path.isTempPath())
+                    respond("", status = HttpStatusCode.NoContent)
+                }
+                else -> error("Unexpected request: ${request.method.value} ${request.url}")
+            }
+        }
+        val client = testClient(
+            engine = engine,
+            writeStrategy = WebDavWriteStrategy.AllowLossy,
+        )
+
+        val resource = client.write(
+            path = "object.zip",
+            bytes = payload,
+            precondition = WebDavWritePrecondition("\"v1\""),
+        )
+
+        assertEquals("\"v2\"", resource.etag)
+        assertEquals(
+            listOf(
+                "PROPFIND", "PUT", "PROPFIND", "PROPFIND", "MOVE",
+                "PROPFIND", "DELETE", "PUT", "PROPFIND",
+            ),
+            engine.requestHistory.map { request -> request.method.value },
+        )
+    }
+
+    @Test
+    fun `direct put replace sends one conditional PUT and never a temp sibling or MOVE`() = runTest {
+        val payload = "payload".encodeToByteArray()
+        val objectPath = "/dav/root/object.zip"
+        var etag = "v1"
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            assertFalse(path.isTempPath(), "Unexpected temp sibling request: ${request.method.value} $path")
+            when (request.method.value) {
+                "PROPFIND" -> respondEtagStat(objectPath, etag)
+                "PUT" -> {
+                    assertEquals("\"$etag\"", request.headers[HttpHeaders.IfMatch])
+                    assertContentEquals(payload, request.body.asBytes())
+                    etag = if (etag == "v1") "v2" else "v3"
+                    respond("", status = HttpStatusCode.NoContent)
+                }
+                else -> error("Unexpected request: ${request.method.value} ${request.url}")
+            }
+        }
+        val client = testClient(
+            engine = engine,
+            writeStrategy = WebDavWriteStrategy.DirectPut,
+        )
+
+        val first = client.write(
+            path = "object.zip",
+            bytes = payload,
+            precondition = WebDavWritePrecondition("\"v1\""),
+        )
+        assertEquals("\"v2\"", first.etag)
+
+        // No sticky degradation is involved: the second write takes the
+        // same direct path.
+        val second = client.write(
+            path = "object.zip",
+            bytes = payload,
+            precondition = WebDavWritePrecondition("\"v2\""),
+        )
+        assertEquals("\"v3\"", second.etag)
+        assertEquals(
+            listOf(
+                "PROPFIND", "PUT", "PROPFIND",
+                "PROPFIND", "PUT", "PROPFIND",
+            ),
+            engine.requestHistory.map { request -> request.method.value },
+        )
+    }
+
+    @Test
+    fun `direct put create sends If-None-Match star without a temp sibling`() = runTest {
+        val payload = "payload".encodeToByteArray()
+        val objectPath = "/dav/root/object.zip"
+        var destinationExists = false
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            assertFalse(path.isTempPath(), "Unexpected temp sibling request: ${request.method.value} $path")
+            when (request.method.value) {
+                "PROPFIND" -> if (destinationExists) {
+                    respondFileStat(objectPath, size = payload.size.toLong())
+                } else {
+                    respond("", status = HttpStatusCode.NotFound)
+                }
+                "PUT" -> {
+                    assertEquals("*", request.headers[HttpHeaders.IfNoneMatch])
+                    assertEquals(null, request.headers[HttpHeaders.IfMatch])
+                    destinationExists = true
+                    respond("", status = HttpStatusCode.Created)
+                }
+                else -> error("Unexpected request: ${request.method.value} ${request.url}")
+            }
+        }
+        val client = testClient(
+            engine = engine,
+            writeStrategy = WebDavWriteStrategy.DirectPut,
+        )
+
+        val resource = client.write(
+            path = "object.zip",
+            mode = WebDavWriteMode.Create,
+            bytes = payload,
+        )
+
+        assertEquals(payload.size.toLong(), resource.size)
+        assertEquals(
+            listOf("PROPFIND", "PUT", "PROPFIND"),
+            engine.requestHistory.map { request -> request.method.value },
+        )
+    }
+
+    @Test
+    fun `direct put fails on a genuine precondition conflict`() = runTest {
+        val payload = "payload".encodeToByteArray()
+        val objectPath = "/dav/root/object.zip"
+        var destinationPutCalls = 0
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            assertFalse(path.isTempPath(), "Unexpected temp sibling request: ${request.method.value} $path")
+            when (request.method.value) {
+                // The destination changes underneath the client right after
+                // the preflight check.
+                "PROPFIND" -> respondEtagStat(objectPath, if (destinationPutCalls == 0) "v1" else "v2")
+                "PUT" -> {
+                    destinationPutCalls += 1
+                    assertEquals("\"v1\"", request.headers[HttpHeaders.IfMatch])
+                    respond("", status = HttpStatusCode.PreconditionFailed)
+                }
+                else -> error("Unexpected request: ${request.method.value} ${request.url}")
+            }
+        }
+        val client = testClient(
+            engine = engine,
+            writeStrategy = WebDavWriteStrategy.DirectPut,
+        )
+
+        assertFailsWith<WebDavException.PreconditionFailed> {
+            client.write(
+                path = "object.zip",
+                bytes = payload,
+                precondition = WebDavWritePrecondition("\"v1\""),
+            )
+        }
+
+        assertEquals(1, destinationPutCalls)
+        assertEquals(
+            listOf("PROPFIND", "PUT", "PROPFIND"),
+            engine.requestHistory.map { request -> request.method.value },
+        )
+    }
+
+    @Test
     fun `lossy create fallback retains If-None-Match condition`() = runTest {
         val payload = "payload".encodeToByteArray()
         val objectPath = "/dav/root/object.zip"
@@ -908,6 +1157,41 @@ class KtorWebDavClientTest {
     }
 
     @Test
+    fun `list children decodes the same name from every href spelling`() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod("PROPFIND"), request.method)
+            respond(
+                content = multistatus(
+                    responseXml(
+                        href = "/dav/root/folder/",
+                        properties = "<D:resourcetype><D:collection/></D:resourcetype>",
+                    ),
+                    // Supplementary character: literal, hex entity, decimal
+                    // entity and percent-encoded UTF-8.
+                    responseXml("/dav/root/folder/😀.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/&#x1F600;.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/&#128512;.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/%F0%9F%98%80.kdbx", "<D:resourcetype/>"),
+                    // Basic plane character in the same four spellings.
+                    responseXml("/dav/root/folder/é.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/&#xE9;.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/&#233;.kdbx", "<D:resourcetype/>"),
+                    responseXml("/dav/root/folder/%C3%A9.kdbx", "<D:resourcetype/>"),
+                ),
+                status = MULTI_STATUS,
+            )
+        }
+        val client = testClient(engine)
+
+        val items = client.listChildren("folder/")
+
+        assertEquals(
+            listOf("folder/é.kdbx", "folder/😀.kdbx"),
+            items.map { item -> item.path }.sorted(),
+        )
+    }
+
+    @Test
     fun `list children throws not found for a missing collection`() = runTest {
         val engine = MockEngine { request ->
             assertEquals("1", request.headers["Depth"])
@@ -997,6 +1281,42 @@ class KtorWebDavClientTest {
         )
 
         assertTrue(client.listChildren("").isEmpty())
+    }
+
+    @Test
+    fun `range read bypasses cached full object response`() = runTest {
+        var gets = 0
+        val engine = MockEngine { request ->
+            when (request.method.value) {
+                "PROPFIND" -> respond(
+                    singleMultistatus(
+                        "/dav/root/object.zip",
+                        "<D:resourcetype/><D:getcontentlength>5</D:getcontentlength>",
+                    ),
+                    MULTI_STATUS,
+                )
+                "GET" -> {
+                    gets++
+                    if (request.headers[HttpHeaders.Range] == null) {
+                        respond("abcde", HttpStatusCode.OK, headersOf(HttpHeaders.CacheControl, "max-age=3600"))
+                    } else {
+                        respond("bcd", PARTIAL_CONTENT, headersOf(HttpHeaders.ContentRange, "bytes 1-3/5"))
+                    }
+                }
+                else -> error("Unexpected request")
+            }
+        }
+        val client = KtorWebDavClient(
+            httpClient = HttpClient(engine) { install(HttpCache) },
+            config = WebDavClientConfig(baseUrl = "https://example.com/dav/root/"),
+        )
+        assertContentEquals("abcde".encodeToByteArray(), client.read("object.zip").readBytesAndClose())
+        assertContentEquals(
+            "bcd".encodeToByteArray(),
+            client.read("object.zip", WebDavByteRange(1, 3)).readBytesAndClose(),
+        )
+        assertEquals(2, gets)
+        client.close()
     }
 
     @Test

@@ -9,9 +9,17 @@ class GpgToolsResultRoute(
 ) : DialogRoute {
     data class Args(
         val title: String,
-        val verification: SimpleNote? = null,
+        val notes: List<SimpleNote> = emptyList(),
         val output: Output? = null,
+        val fileOutput: FileOutput? = null,
     ) {
+        data class FileOutput(
+            val id: String,
+            val name: String,
+            val size: Long?,
+            val incognito: Boolean,
+        )
+
         data class Output(
             val label: String,
             val text: String,

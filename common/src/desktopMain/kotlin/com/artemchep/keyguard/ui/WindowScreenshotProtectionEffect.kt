@@ -2,8 +2,6 @@ package com.artemchep.keyguard.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.awt.ComposeDialog
-import androidx.compose.ui.awt.ComposeWindow
 import arrow.core.throwIfFatal
 import com.artemchep.jna.windows.setWindowExcludedFromCapture
 import com.artemchep.keyguard.common.model.AllowScreenshots
@@ -15,7 +13,7 @@ import com.artemchep.keyguard.platform.recordLog
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.onEach
-import org.kodein.di.compose.rememberInstance
+import org.koin.compose.koinInject
 
 @Composable
 fun WindowScreenshotProtectionEffect() {
@@ -23,12 +21,9 @@ fun WindowScreenshotProtectionEffect() {
         return
     }
 
-    val windowHandle = when (val window = LocalComposeWindow.current) {
-        is ComposeWindow -> window.windowHandle
-        is ComposeDialog -> window.windowHandle
-        else -> return
-    }
-    val getAllowScreenshots by rememberInstance<GetAllowScreenshots>()
+    val windowHandle = LocalComposeWindow.current.nativeWindowHandle
+        ?: return
+    val getAllowScreenshots = koinInject<GetAllowScreenshots>()
     LaunchedEffect(
         getAllowScreenshots,
         windowHandle,

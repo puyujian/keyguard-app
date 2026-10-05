@@ -5,77 +5,25 @@
 //! the C adapter. Panics never cross the boundary: they are contained and
 //! reported as a bridge failure with no path or payload disclosure.
 
-use std::panic::AssertUnwindSafe;
-
 use jni::{
     JNIEnv,
     objects::{JByteArray, JIntArray, JLongArray, JObject, JString},
     sys::{jint, jlong, jlongArray},
 };
+use keyguard_ffi::{PanicHook, flatten as unwrap, java_string};
 use keyguard_io_core::{abi, bridge};
 use zeroize::Zeroizing;
 
-/// Runs `body` behind the panic boundary every entry point shares.
-///
-/// The hook is installed *inside* the boundary: `std::panic::set_hook`
-/// "panics if called from a panicking thread", and a panic inside
-/// `Once::call_once` poisons the `Once` so that every later call panics too.
-/// Installed outside the boundary, one such panic would escape the
-/// `extern "system"` frame and abort the process on every subsequent bridge
-/// call — permanently bricking the library rather than failing one operation.
-fn contained<R>(body: impl FnOnce() -> R) -> Result<R, i64> {
-    std::panic::catch_unwind(AssertUnwindSafe(|| {
-        keyguard_io_core::install_redacting_panic_hook();
-        body()
-    }))
-    .map_err(|_| abi::pack_bridge_panic())
-}
+/// Unit tests keep Rust's default hook so a caught assertion still reports
+/// its payload and source location in CI logs.
+const PANIC_HOOK: PanicHook = if cfg!(test) {
+    PanicHook::Keep
+} else {
+    PanicHook::Redact
+};
 
-fn java_string(environment: &mut JNIEnv<'_>, value: &JString<'_>) -> Result<String, i64> {
-    if value.is_null() {
-        return Err(abi::pack_bridge_invalid_argument());
-    }
-    let raw_environment = environment.get_raw();
-    // SAFETY: `JNIEnv` owns a valid JNI function table for this native call.
-    let functions = unsafe { &**raw_environment };
-    let get_length = functions
-        .GetStringLength
-        .ok_or_else(abi::pack_bridge_invalid_argument)?;
-    let get_region = functions
-        .GetStringRegion
-        .ok_or_else(abi::pack_bridge_invalid_argument)?;
-    // SAFETY: Null was rejected and JNI export signatures guarantee that
-    // `value` is a live local java.lang.String reference.
-    let length = unsafe { get_length(raw_environment, value.as_raw()) };
-    let length = usize::try_from(length).map_err(|_| abi::pack_bridge_invalid_argument())?;
-    let mut utf16 = vec![0_u16; length];
-    if length != 0 {
-        let length = i32::try_from(length).map_err(|_| abi::pack_bridge_invalid_argument())?;
-        // SAFETY: The requested region is the string's exact UTF-16 extent and
-        // the output buffer has matching writable capacity.
-        unsafe {
-            get_region(
-                raw_environment,
-                value.as_raw(),
-                0,
-                length,
-                utf16.as_mut_ptr(),
-            );
-        }
-        if environment.exception_check().unwrap_or(true) {
-            // The JNI spec permits only a short list of functions while an
-            // exception is pending — "the native code must first clear the
-            // exception before making other JNI calls" — and `NewLongArray` /
-            // `SetLongArrayRegion`, which this call's error path still needs to
-            // build a return value, are not on it. Leaving the exception
-            // pending aborts the VM under `-Xcheck:jni`. The bridge reports
-            // stable packed codes rather than Java exceptions, so discarding it
-            // and returning invalid-argument is the intended contract.
-            let _ = environment.exception_clear();
-            return Err(abi::pack_bridge_invalid_argument());
-        }
-    }
-    String::from_utf16(&utf16).map_err(|_| abi::pack_bridge_invalid_argument())
+fn contained<R>(body: impl FnOnce() -> R) -> Result<R, i64> {
+    keyguard_ffi::contained(PANIC_HOOK, body)
 }
 
 fn java_handle(handle: jlong) -> Result<u64, i64> {
@@ -139,12 +87,6 @@ fn java_bytes(
     Ok(buffer)
 }
 
-fn unwrap(result: Result<i64, i64>) -> jlong {
-    match result {
-        Ok(value) | Err(value) => value,
-    }
-}
-
 fn java_long_array(environment: &JNIEnv<'_>, fields: &[jlong]) -> jlongArray {
     let Ok(length) = jint::try_from(fields.len()) else {
         return std::ptr::null_mut();
@@ -173,17 +115,14 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_abiVersio
 /// Opens and retains an existing absolute directory.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_directoryOpen(
-    mut environment: JNIEnv<'_>,
+    environment: JNIEnv<'_>,
     _object: JObject<'_>,
     directory: JString<'_>,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let directory = java_string(&mut environment, &directory)?;
-            Ok(bridge::directory_open(&directory))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let directory = java_string(&environment, &directory)?;
+        Ok(bridge::directory_open(&directory))
+    }))
 }
 
 /// Closes one retained-directory handle.
@@ -193,53 +132,46 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_directory
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::directory_close(java_handle(handle)?)))
-            .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        Ok(bridge::directory_close(java_handle(handle)?))
+    }))
 }
 
 /// Opens an atomic-write transaction; returns a positive handle or a packed
 /// failure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_txnBegin(
-    mut environment: JNIEnv<'_>,
+    environment: JNIEnv<'_>,
     _object: JObject<'_>,
     destination: JString<'_>,
     options: JIntArray<'_>,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let destination = java_string(&mut environment, &destination)?;
-            let options = java_txn_options(&environment, &options)?;
-            Ok(bridge::txn_begin(&destination, options))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let destination = java_string(&environment, &destination)?;
+        let options = java_txn_options(&environment, &options)?;
+        Ok(bridge::txn_begin(&destination, options))
+    }))
 }
 
 /// Opens an atomic-write transaction beneath a retained directory.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_txnBeginAtDirectory(
-    mut environment: JNIEnv<'_>,
+    environment: JNIEnv<'_>,
     _object: JObject<'_>,
     directory_handle: jlong,
     relative_destination: JString<'_>,
     options: JIntArray<'_>,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let directory_handle = java_handle(directory_handle)?;
-            let destination = java_string(&mut environment, &relative_destination)?;
-            let options = java_txn_options(&environment, &options)?;
-            Ok(bridge::txn_begin_at_directory(
-                directory_handle,
-                &destination,
-                options,
-            ))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let directory_handle = java_handle(directory_handle)?;
+        let destination = java_string(&environment, &relative_destination)?;
+        let options = java_txn_options(&environment, &options)?;
+        Ok(bridge::txn_begin_at_directory(
+            directory_handle,
+            &destination,
+            options,
+        ))
+    }))
 }
 
 /// Appends a Java byte-array range to a transaction; returns the byte count
@@ -258,14 +190,11 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_txnWrite(
     offset: jint,
     length: jint,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let handle = java_handle(handle)?;
-            let bytes = java_bytes(&environment, &input, offset, length)?;
-            Ok(bridge::txn_write(handle, &bytes))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let handle = java_handle(handle)?;
+        let bytes = java_bytes(&environment, &input, offset, length)?;
+        Ok(bridge::txn_write(handle, &bytes))
+    }))
 }
 
 /// Commits a transaction, consuming its handle; returns a packed commit
@@ -276,9 +205,7 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_txnCommit
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::txn_commit(java_handle(handle)?))).and_then(std::convert::identity),
-    )
+    unwrap(contained(|| Ok(bridge::txn_commit(java_handle(handle)?))))
 }
 
 /// Aborts a transaction, consuming its handle; returns zero or a packed
@@ -289,26 +216,21 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_txnAbort(
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::txn_abort(java_handle(handle)?))).and_then(std::convert::identity),
-    )
+    unwrap(contained(|| Ok(bridge::txn_abort(java_handle(handle)?))))
 }
 
 /// Opens private scratch storage; returns a positive handle or a packed
 /// failure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchOpen(
-    mut environment: JNIEnv<'_>,
+    environment: JNIEnv<'_>,
     _object: JObject<'_>,
     directory: JString<'_>,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let directory = java_string(&mut environment, &directory)?;
-            Ok(bridge::scratch_open(&directory))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let directory = java_string(&environment, &directory)?;
+        Ok(bridge::scratch_open(&directory))
+    }))
 }
 
 /// Appends a Java byte-array range to scratch storage; returns the byte
@@ -322,14 +244,11 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchWr
     offset: jint,
     length: jint,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let handle = java_handle(handle)?;
-            let bytes = java_bytes(&environment, &input, offset, length)?;
-            Ok(bridge::scratch_write(handle, &bytes))
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let handle = java_handle(handle)?;
+        let bytes = java_bytes(&environment, &input, offset, length)?;
+        Ok(bridge::scratch_write(handle, &bytes))
+    }))
 }
 
 /// Seals scratch storage for reading; returns zero or a packed failure.
@@ -339,10 +258,7 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchSe
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::scratch_seal(java_handle(handle)?)))
-            .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| Ok(bridge::scratch_seal(java_handle(handle)?))))
 }
 
 /// Returns the scratch length in bytes or a packed failure.
@@ -352,10 +268,9 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchLe
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::scratch_length(java_handle(handle)?)))
-            .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        Ok(bridge::scratch_length(java_handle(handle)?))
+    }))
 }
 
 /// Reads scratch bytes at a fixed position into a Java byte-array range;
@@ -370,31 +285,27 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchRe
     offset: jint,
     length: jint,
 ) -> jlong {
-    unwrap(
-        contained(|| {
-            let handle = java_handle(handle)?;
-            let position =
-                u64::try_from(position).map_err(|_| abi::pack_bridge_invalid_argument())?;
-            let array_length = environment
-                .get_array_length(&output)
-                .map_err(|_| abi::pack_bridge_invalid_argument())?;
-            let length = checked_range(array_length, offset, length)?;
-            let mut buffer = Zeroizing::new(vec![0_u8; length]);
-            let result = bridge::scratch_read_at(handle, position, &mut buffer);
-            if result <= 0 {
-                return Ok(result);
-            }
-            let read = result as usize;
-            // SAFETY: jbyte and u8 share size, alignment, and layout; the cast
-            // only changes signedness and `read` never exceeds the buffer length.
-            let signed = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<i8>(), read) };
-            environment
-                .set_byte_array_region(&output, offset, signed)
-                .map_err(|_| abi::pack_bridge_invalid_argument())?;
-            Ok(result)
-        })
-        .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        let handle = java_handle(handle)?;
+        let position = u64::try_from(position).map_err(|_| abi::pack_bridge_invalid_argument())?;
+        let array_length = environment
+            .get_array_length(&output)
+            .map_err(|_| abi::pack_bridge_invalid_argument())?;
+        let length = checked_range(array_length, offset, length)?;
+        let mut buffer = Zeroizing::new(vec![0_u8; length]);
+        let result = bridge::scratch_read_at(handle, position, &mut buffer);
+        if result <= 0 {
+            return Ok(result);
+        }
+        let read = result as usize;
+        // SAFETY: jbyte and u8 share size, alignment, and layout; the cast
+        // only changes signedness and `read` never exceeds the buffer length.
+        let signed = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<i8>(), read) };
+        environment
+            .set_byte_array_region(&output, offset, signed)
+            .map_err(|_| abi::pack_bridge_invalid_argument())?;
+        Ok(result)
+    }))
 }
 
 /// Closes scratch storage, consuming its handle; returns zero or a packed
@@ -405,10 +316,9 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchCl
     _object: JObject<'_>,
     handle: jlong,
 ) -> jlong {
-    unwrap(
-        contained(|| Ok(bridge::scratch_close(java_handle(handle)?)))
-            .and_then(std::convert::identity),
-    )
+    unwrap(contained(|| {
+        Ok(bridge::scratch_close(java_handle(handle)?))
+    }))
 }
 
 /// Sweeps a directory for orphaned temporary artifacts.
@@ -417,7 +327,7 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_scratchCl
 /// a one-element array containing the packed negative failure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_sweepOrphans(
-    mut environment: JNIEnv<'_>,
+    environment: JNIEnv<'_>,
     _object: JObject<'_>,
     directory: JString<'_>,
     older_than_ms: jlong,
@@ -428,7 +338,7 @@ pub extern "system" fn Java_com_artemchep_keyguard_util_io_NativeIoJni_sweepOrph
         if role_mask & !bridge::SWEEP_ROLE_MASK_ALL != 0 {
             return Err(abi::pack_bridge_invalid_argument());
         }
-        let directory = java_string(&mut environment, &directory)?;
+        let directory = java_string(&environment, &directory)?;
         let older_than_ms =
             u64::try_from(older_than_ms).map_err(|_| abi::pack_bridge_invalid_argument())?;
         bridge::sweep(&directory, older_than_ms, role_mask)
@@ -468,13 +378,21 @@ mod tests {
     #[test]
     fn scalar_boundary_preserves_the_cleanup_incomplete_bit() {
         let packed = abi::pack_bridge_panic() | (1_i64 << 56);
-        assert_eq!(unwrap(Ok(packed)), packed);
+        assert_eq!(unwrap(Ok(Ok(packed))), packed);
     }
 
     #[test]
     fn scalar_boundary_preserves_publication_unknown_operation_bits() {
         let packed = 0x0E00_0000_0000_0BF7_i64;
-        assert_eq!(unwrap(Ok(packed)), packed);
+        assert_eq!(unwrap(Ok(Ok(packed))), packed);
+    }
+
+    #[test]
+    fn scalar_boundary_preserves_outer_and_inner_errors() {
+        let panic = abi::pack_bridge_panic();
+        let invalid_argument = abi::pack_bridge_invalid_argument();
+        assert_eq!(unwrap(Err(panic)), panic);
+        assert_eq!(unwrap(Ok(Err(invalid_argument))), invalid_argument);
     }
 
     #[test]

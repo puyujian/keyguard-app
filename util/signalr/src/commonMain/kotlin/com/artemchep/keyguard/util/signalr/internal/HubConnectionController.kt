@@ -35,7 +35,6 @@ internal suspend fun runHubConnectionController(
     val commands = Channel<HubConnectionCommand>(COMMAND_BUFFER_CAPACITY)
     var lifecycle: Lifecycle = Lifecycle.Disconnected
     var nextSessionId = 1L
-    var disposed = false
 
     fun isCurrentConnectAttempt(
         sessionId: Long,
@@ -89,10 +88,13 @@ internal suspend fun runHubConnectionController(
                 null,
             )
 
-            runCatching {
-                previous.cancelAndJoin(
-                    closeTimeout = options.closeTimeout,
-                )
+            // Cleanup must survive cancellation of event delivery or the controller.
+            withContext(NonCancellable) {
+                runCatching {
+                    previous.cancelAndJoin(
+                        closeTimeout = options.closeTimeout,
+                    )
+                }
             }
 
             lifecycle = Lifecycle.Disconnected
@@ -156,10 +158,6 @@ internal suspend fun runHubConnectionController(
     }
 
     suspend fun startInternal() {
-        if (disposed) {
-            throw IllegalStateException("HubConnection has already stopped.")
-        }
-
         val attempt = launchConnect()
         lifecycle = Lifecycle.Connecting(
             sessionId = attempt.sessionId,
@@ -302,15 +300,6 @@ internal suspend fun runHubConnectionController(
         }
     }
 
-    fun disposeController() {
-        if (disposed) {
-            return
-        }
-
-        disposed = true
-        commands.close()
-    }
-
     try {
         commands.send(HubConnectionCommand.Start)
         commandLoop()
@@ -319,7 +308,7 @@ internal suspend fun runHubConnectionController(
             stopInternal(
                 reason = HubConnectionCloseReason.ClientStopped,
             )
-            disposeController()
+            commands.close()
         }
     }
 }

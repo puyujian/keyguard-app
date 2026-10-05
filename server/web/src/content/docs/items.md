@@ -39,7 +39,7 @@ friends — see [Item types & extras](/docs/item-extras/).
 - **Folders** can be nested: use `/` in a folder name to create a hierarchy,
   like `Work/Servers`. Move items with the **Move to folder** action.
 - **Favorites** pin the items you use most.
-- **Archive** tucks away items you want to keep but don't want in everyday
+- **Archive** hides items you want to keep but do not want in everyday
   lists — archived items can be restored at any time.
 - **Trash** holds deleted items until you restore or permanently delete them.
   (Bitwarden's own server purges trashed items after **30 days**; local
@@ -61,11 +61,10 @@ database's native tags, while Bitwarden items use a
 ## Per-item protection
 
 Sensitive items can demand an extra step: enable the **authentication
-re-prompt** on an item and Keyguard asks you to authenticate again whenever
-the item is viewed or autofilled.
+re-prompt** on an item and Keyguard asks you to authenticate again before it
+reveals, copies or autofills the item's secrets.
 
 ## Password history
 
-Login items keep a **password history**, so a password you replaced —
-deliberately or not — is never simply gone. Open an item's menu and choose
-**View password history**.
+Login items keep a **password history**, so a replaced password is never lost.
+Open an item's menu and choose **View password history**.

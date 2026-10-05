@@ -7,6 +7,13 @@
     <string name="no">No</string>
     <!-- On click brings Keyguard app to the front -->
     <string name="show_keyguard">Mostra Keyguard</string>
+    <string name="instance_service_error_title">Keyguard instance service failed</string>
+    <string name="instance_service_error_text">Keyguard could not start or contact its instance service. If this continues after restarting Keyguard, include the details below in a bug report.</string>
+    <string name="instance_service_permission_text">Keyguard cannot safely access its instance files. Check ownership and permissions of its data and runtime directories and their parent directories.</string>
+    <string name="instance_service_timeout_text">Another Keyguard process did not respond in time. Close that process and try again.</string>
+    <string name="instance_service_unavailable_text">The native instance service is unavailable. Reinstall Keyguard if restarting it does not help.</string>
+    <string name="instance_service_configuration_text">The instance service configuration or protocol is invalid. Include the details below in a bug report.</string>
+    <string name="instance_service_stopped_text">The instance service stopped and could not recover. Finish any edits, then quit and reopen Keyguard. Further launches cannot activate this window until you restart.</string>
     <!-- A name of a thing, such as an account -->
     <string name="generic_name">Nome</string>
     <string name="description">Descrizione</string>
@@ -383,6 +390,7 @@
     <string name="ciphers_action_upload_gpg_public_key_title">Carica la chiave pubblica GPG</string>
     <string name="ciphers_action_upload_gpg_public_key_confirmation_title">Caricare la chiave pubblica sul keyserver?</string>
     <string name="ciphers_action_upload_gpg_public_key_confirmation_text">Keyguard invierà la chiave pubblica GPG armored di questo elemento al keyserver configurato. La chiave pubblica può includere impronte digitali, ID utente come nomi e indirizzi e-mail, sottochiavi, date e stato di revoca. Il keyserver può memorizzare e ridistribuire questi dati pubblici. Questo caricamento non richiede e-mail di verifica.</string>
+    <string name="ciphers_action_upload_gpg_public_key_confirmation_verify_text">Select the e-mail addresses that should receive a verification e-mail from the keyserver. Until an address is verified, the key cannot be found by that address.</string>
     <string name="ciphers_action_refresh_gpg_public_key_title">Aggiorna la chiave pubblica GPG</string>
     <string name="ciphers_action_refresh_gpg_public_key_confirmation_title">Aggiornare la chiave pubblica dal keyserver?</string>
     <string name="ciphers_action_refresh_gpg_public_key_confirmation_text">Keyguard contatterà il keyserver GPG configurato con l'impronta digitale di questa chiave. Se viene trovata una chiave pubblica corrispondente, Keyguard aggiornerà la chiave pubblica memorizzata, i metadati della chiave e lo stato del keyserver per questo elemento.</string>
@@ -453,6 +461,7 @@
     <string name="email_action_check_data_breach_title">Controlla l'email in violazioni di dati conosciute</string>
     <string name="username_action_check_data_breach_title">Controlla il nome utente in violazioni di dati conosciute</string>
     <string name="password_action_check_data_breach_title">Controlla la password in violazioni di dati conosciute</string>
+    <string name="password_action_test_memory_title">Type from memory</string>
     <string name="website_action_check_data_breach_title">Controlla il sito web in violazioni di dati conosciute</string>
     <string name="uri_action_launch_app_title">Avvia app</string>
     <string name="uri_action_launch_website_title">Avvia sito web</string>
@@ -536,9 +545,15 @@
     <string name="gpg_key_import_error_unsupported_platform">L'importazione delle chiavi GPG non è supportata su questa piattaforma.</string>
     <string name="gpg_key_import_error_invalid_passphrase">La passphrase della chiave GPG non è valida.</string>
     <string name="gpg_key_import_error_malformed_key">Il file della chiave GPG è danneggiato.</string>
+    <string name="gpg_key_import_error_multiple_keys">The file contains more than one GPG key. Export and import the keys one at a time.</string>
     <string name="gpg_key_import_error_read">Impossibile leggere il file selezionato.</string>
     <string name="gpg_key_import_error_passphrase_required">È necessaria una passphrase per sbloccare questa chiave GPG.</string>
     <string name="gpg_key_import_error_key_changed">La chiave GPG è cambiata durante l'importazione. Prova a importarla di nuovo.</string>
+    <string name="gpg_key_import_error_mismatched_key">The imported key does not match the GPG key in this item.</string>
+    <string name="gpg_key_import_error_existing_malformed">The GPG key stored in this item is malformed and cannot be merged.</string>
+    <string name="gpg_key_import_error_secret_conflict">The imported secret key material conflicts with the secret key stored in this item.</string>
+    <string name="gpg_key_import_error_resource_limit">The GPG key is too large or complex to import.</string>
+    <string name="gpg_key_import_error_reconcile">The GPG key could not be safely merged.</string>
     <string name="gpg_key_import_passphrase_title">Passphrase</string>
     <string name="gpg_key_import_passphrase_hint">Inserisci la passphrase della chiave GPG</string>
     <string name="gpg_key_import_passphrase_dialog_title">Inserisci la passphrase della chiave GPG</string>
@@ -555,6 +570,7 @@
     <string name="gpg_key_expiry_primary">Chiave primaria</string>
     <string name="gpg_key_expiry_subkey">Sottochiave <xliff:g id="key_id" example="0A1B2C3D">%1$s</xliff:g></string>
     <string name="gpg_key_expiry_subkey_capabilities">Capacità: <xliff:g id="capabilities" example="sign, encrypt">%1$s</xliff:g>. Scadenza attuale: <xliff:g id="expiry" example="Jan 1, 2030">%2$s</xliff:g></string>
+    <string name="gpg_key_expiry_subkey_weak_self_signature">Signed with a weak algorithm (SHA-1). Renewing re-signs it with a modern one.</string>
     <string name="gpg_key_expiry_capability_sign">firma</string>
     <string name="gpg_key_expiry_capability_encrypt">crittografia</string>
     <string name="gpg_key_expiry_preset_one_year">Un anno</string>
@@ -572,6 +588,45 @@
     <string name="gpg_key_expiry_invalid_message">Scegli una data di scadenza futura valida.</string>
     <string name="gpg_key_expiry_revoked_message">Un componente di chiave revocato non può essere rinnovato.</string>
     <string name="gpg_key_expiry_unresolved_revocation_message">Una revoca designata non può essere verificata perché la chiave pubblica del revocante non è disponibile. Importala e riprova.</string>
+    <string name="gpg_key_expiry_unsupported_signing_hash_message">This key can only be re-certified with an insecure digest algorithm. Migrate to a modern key instead.</string>
+    <string name="gpg_key_expiry_missing_self_signature_message">This key cannot be renewed because its self-signature is missing, invalid, or rejected by security policy.</string>
+    <string name="gpg_user_id_revocation_dialog_title">Revoke GPG User ID</string>
+    <string name="gpg_user_id_revocation_dialog_message">Select the User ID to revoke. Revocation adds a signed statement to the certificate and does not erase the identity or its history.</string>
+    <string name="gpg_user_id_revocation_confirm">Revoke</string>
+    <string name="gpg_user_id_revocation_last_identity_message">A GPG key must keep at least one usable User ID. Add a replacement before revoking this one.</string>
+    <string name="gpg_user_id_revocation_no_identity_message">This key has no active User ID that can be revoked.</string>
+    <string name="gpg_user_id_replacement_dialog_title">Replace GPG User ID</string>
+    <string name="gpg_user_id_replacement_dialog_message">Select the old User ID. Keyguard will add the replacement and revoke this exact User ID in one update.</string>
+    <string name="gpg_user_id_replacement_confirm_next">Next</string>
+    <string name="gpg_user_id_replacement_no_identity_message">This key has no active User ID that can be replaced.</string>
+    <string name="gpg_user_id_replacement_value_title">New GPG User ID</string>
+    <string name="gpg_user_id_replacement_value_message">Enter the exact new OpenPGP User ID. Keyguard will not trim or normalize it.</string>
+    <string name="gpg_user_id_replacement_value_label">User ID</string>
+    <string name="gpg_user_id_replacement_value_hint">Name &lt;email@example.com&gt;</string>
+    <string name="gpg_user_id_replacement_value_confirm">Replace</string>
+    <string name="gpg_user_id_replacement_invalid_message">Enter a non-empty User ID of at most 1024 UTF-8 bytes without control characters.</string>
+    <string name="gpg_user_id_replacement_same_identity_message">Enter a User ID different from the selected identity.</string>
+    <string name="gpg_user_id_replacement_duplicate_message">That User ID is already active on this key.</string>
+    <string name="gpg_user_id_replacement_title">Replace User ID</string>
+    <string name="gpg_user_id_replacement_success_title">GPG User ID replaced</string>
+    <string name="gpg_user_id_replacement_success_message">Save this item, then redistribute or upload its public key to publish the replacement.</string>
+    <string name="gpg_user_id_replacement_already_done_message">This replacement was already applied. No new signatures were created.</string>
+    <string name="gpg_user_id_replacement_failed_title">Failed to replace GPG User ID</string>
+    <string name="gpg_user_id_replacement_failed_message">The User ID could not be replaced. The original key was left unchanged.</string>
+    <string name="gpg_user_id_replacement_retired_message">That exact User ID was previously revoked and cannot be added again.</string>
+    <string name="gpg_user_id_replacement_target_missing">The selected User ID changed or is no longer active. Reopen the key and try again.</string>
+    <string name="gpg_user_id_replacement_private_key_required">Import the private key to replace one of its User IDs.</string>
+    <string name="gpg_user_id_replacement_unavailable">GPG User-ID replacement is not supported on this platform.</string>
+    <string name="gpg_user_id_revocation_title">Revoke User ID</string>
+    <string name="gpg_user_id_revocation_success_title">GPG User ID revoked</string>
+    <string name="gpg_user_id_revocation_success_message">Save this item, then redistribute or upload its public key to publish the revocation.</string>
+    <string name="gpg_user_id_revocation_already_done_message">This User ID was already revoked. No new signature was created.</string>
+    <string name="gpg_user_id_revocation_failed_title">Failed to revoke GPG User ID</string>
+    <string name="gpg_user_id_revocation_failed_message">The User ID could not be revoked. The original key was left unchanged.</string>
+    <string name="gpg_user_id_revocation_target_missing">The selected User ID changed or is no longer eligible. Reopen the key and try again.</string>
+    <string name="gpg_user_id_revocation_private_key_required">Import the private key to revoke one of its User IDs.</string>
+    <string name="gpg_user_id_revocation_unavailable">GPG User-ID revocation is not supported on this platform.</string>
+    <string name="gpg_user_id_mutation_key_revoked_message">A revoked GPG key cannot be changed.</string>
     <string name="ssh_key_import_title">Importa chiave SSH</string>
     <string name="ssh_key_import_drop_here">Drop a file to import an SSH key</string>
     <string name="ssh_key_import_failed_title">Failed to import SSH key</string>
@@ -677,6 +732,7 @@
         solely of whitespace characters. It's OK to translate it exactly the same
         as the "Must not be empty" error. -->
     <string name="error_must_not_be_blank">Non può essere vuoto</string>
+    <string name="error_invalid_regex">Invalid regular expression</string>
     <string name="error_must_be_custom_domain">Deve essere un dominio personalizzato</string>
     <string name="error_must_be_number">Deve essere un numero</string>
     <string name="error_must_be_less_than_days">Deve essere a meno di <xliff:g id="days" example="15">%1$d</xliff:g> giorni da oggi</string>
@@ -710,9 +766,12 @@
     <string name="error_failed_open_app_for">Nessun'app installata può gestire questa richiesta</string>
     <string name="error_failed_unknown">Qualcosa è andato storto</string>
     <string name="error_failed_encrypt_biometric_key">Impossibile crittografare la chiave biometrica</string>
+    <string name="biometric_error_policy_not_installed">Keyguard could not install the system permission rule needed for system authentication.</string>
+    <string name="biometric_error_policy_not_installed_flatpak">Keyguard needs a one-time system permission rule to use system authentication. Run this command in a terminal on the host, then try again:\n%1$s</string>
     <string name="error_failed_decrypt_biometric_key">Impossibile decrittografare la chiave biometrica</string>
     <string name="error_failed_ssh_agent_start">Impossibile avviare l'agente SSH</string>
     <string name="error_failed_gpg_agent_start">Impossibile avviare l'agente GPG</string>
+    <string name="error_failed_power_lock_start">Could not enable locking when the screen turns off or the device sleeps. Restart Keyguard to try again.</string>
     <string name="error_credential_calling_app_not_privileged">L'app chiamante non è nell'elenco delle app con privilegi e non può richiedere l'autenticazione per conto di altre app.</string>
     <!--
         Shows up if the calling app is not privileged and allows a user
@@ -729,6 +788,9 @@
     <string name="scanqr_camera_permission_required_text">L'autorizzazione della fotocamera è necessaria per scansionare i codici QR.</string>
     <string name="post_notifications_permission_banner_title">Le notifiche sono disattivate</string>
     <string name="post_notifications_permission_banner_text">Concedi l'autorizzazione alle notifiche per consentire a Keyguard di mostrare la password monouso durante la compilazione automatica e altro.</string>
+    <string name="local_network_permission_banner_title">Allow local network access</string>
+    <string name="local_network_permission_banner_text">If your server is on your local network, allow access and retry the connection.</string>
+    <string name="local_network_permission_open_settings_action">Open app settings</string>
     <!-- Title of the 'Show as Barcode' dialog -->
     <string name="barcodetype_title">Codice a barre</string>
     <string name="barcodetype_action_show_in_barcode_title">Mostra come codice a barre</string>
@@ -785,12 +847,22 @@
     <string name="emailleak_breach_reported_at">Segnalata il <xliff:g id="date" example="1 January 1970">%1$s</xliff:g></string>
     <string name="emailleak_failed_to_load_status_text">Impossibile controllare le violazioni dei dati. Al momento potresti essere offline</string>
     <string name="emailleak_failed_no_api_found_text">Failed to check data breaches. The endpoint is not available</string>
+    <!-- Title of the 'Website data breach' dialog -->
+    <string name="websiteleak_title">Data breach</string>
+    <string name="websiteleak_note">Breached website data can provide malicious actors with access to sensitive personal and financial information, potentially compromising user accounts across that service.</string>
+    <string name="websiteleak_breach_not_found_title">No breaches found</string>
+    <string name="websiteleak_breach_found_title">Website breaches found</string>
+    <string name="websiteleak_breach_section">Breaches</string>
+    <string name="websiteleak_breach_occurred_at">Occurred on <xliff:g id="date" example="1 January 1970">%1$s</xliff:g></string>
+    <string name="websiteleak_breach_reported_at">Reported on <xliff:g id="date" example="1 January 1970">%1$s</xliff:g></string>
     <string name="passwordleak_title">Violazioni dei dati</string>
     <string name="passwordleak_note">Una password trovata nelle violazioni dei dati richiede molto meno tempo per essere violata e non dovrebbe mai essere utilizzata.</string>
     <string name="passwordleak_occurrences_found_title">La password è compromessa</string>
     <string name="passwordleak_occurrences_found_text">La password è stata identificata in violazioni di dati conosciute. Si prega di modificarla immediatamente per proteggere la tua sicurezza online</string>
     <string name="passwordleak_occurrences_not_found_title">Nessuna violazione trovata</string>
     <string name="passwordleak_failed_to_load_status_text">Impossibile controllare le violazioni dei dati. Al momento potresti essere offline</string>
+    <string name="password_memory_test_note">Enter this password from memory. Keyguard compares it with the saved password on this device.</string>
+    <string name="password_memory_test_success">Password matches</string>
     <!-- Title of the 'Show in Large Type' dialog -->
     <string name="largetype_title">Tipo Grande</string>
     <string name="largetype_action_show_in_large_type_title">Mostra in Tipo Grande</string>
@@ -979,6 +1051,7 @@
     <string name="home_settings_label">Impostazioni</string>
     <string name="lock_reason_inactivity">Bloccato per inattività</string>
     <string name="lock_reason_screen_off">Bloccato per schermo spento</string>
+    <string name="lock_reason_system_sleep">Locked because the device went to sleep</string>
     <string name="lock_reason_manually">Bloccato manualmente</string>
     <string name="send_type_text">Testo</string>
     <string name="send_type_file">File</string>
@@ -1238,6 +1311,7 @@
     <string name="generator_gpg_key_name_title">Nome</string>
     <string name="generator_gpg_key_email_title">Email</string>
     <string name="generator_gpg_key_modern_note">Crea una chiave OpenPGP con chiavi di firma/certificazione Ed25519 e una sottochiave di crittografia X25519.</string>
+    <string name="generator_gpg_key_rsa_note">Creates an OpenPGP key with an RSA certification key and separate RSA signing and encryption subkeys.</string>
     <string name="generator_gpg_key_modern_text">Struttura moderna della chiave OpenPGP</string>
     <string name="generator_key_length_title">Lunghezza</string>
     <string name="generator_key_length_item"><xliff:g id="length" example="1024">%1$s</xliff:g>-bit</string>
@@ -1596,6 +1670,8 @@
     <string name="pref_item_lock_vault_after_reboot_text">Blocca la cassaforte dopo un riavvio del dispositivo</string>
     <string name="pref_item_lock_vault_after_screen_off_title">Blocca quando lo schermo viene si spegne</string>
     <string name="pref_item_lock_vault_after_screen_off_text">Blocca la cassaforte dopo alcuni secondi una volta che lo schermo è spento</string>
+    <string name="pref_item_lock_vault_after_screen_off_desktop_title">Lock when screen turns off or device sleeps</string>
+    <string name="pref_item_lock_vault_after_screen_off_desktop_text">Lock the vault when the display turns off or the device goes to sleep</string>
     <string name="pref_item_lock_vault_after_delay_title">Blocca dopo un ritardo</string>
     <string name="pref_item_lock_vault_after_delay_immediately_text">Immediatamente</string>
     <string name="pref_item_lock_vault_after_delay_never_text">Mai</string>
@@ -1661,6 +1737,8 @@
     <string name="pref_item_license_sync_no_purchases">Nessun acquisto idoneo trovato</string>
     <string name="pref_item_license_sync_failed">Impossibile ottenere il codice di licenza</string>
     <string name="pref_item_biometric_unlock_title">Sblocco biometrico</string>
+    <string name="pref_item_windows_hello_unlock_title">Windows Hello unlock</string>
+    <string name="pref_item_system_auth_unlock_title">System authentication unlock</string>
     <string name="pref_item_biometric_unlock_require_confirmation_title">Richiedi conferma</string>
     <string name="pref_item_biometric_unlock_require_confirmation_text">Richiede un ulteriore tocco sul pulsante di conferma dopo un'autenticazione biometrica riuscita</string>
     <string name="pref_item_yubikey_unlock_title">Sblocco tramite YubiKey</string>
@@ -1727,6 +1805,8 @@
     <string name="pref_item_permission_write_external_storage_grant">Concedi il permesso di scrittura sulla memoria esterna</string>
     <string name="pref_item_permission_camera_title">Fotocamera</string>
     <string name="pref_item_permission_camera_text">Utilizzato per scansionare i codici QR</string>
+    <string name="pref_item_permission_local_network_title">Local network</string>
+    <string name="pref_item_permission_local_network_text">Used to connect to self-hosted Bitwarden, WebDAV, and SFTP servers on your local network</string>
     <string name="pref_item_allow_two_panel_layout_in_landscape_title">Consenti layout a due colonne in modalità orizzontale</string>
     <string name="pref_item_allow_two_panel_layout_in_portrait_title">Consenti layout a due colonne in modalità verticale</string>
     <string name="pref_item_gpg_agent_title">Agente GPG</string>
@@ -1856,7 +1936,6 @@
     <string name="gpg_agent_setup_step_1_text">Apri le impostazioni GPG, abilita l'agente GPG e assicurati che la cassaforte contenga una chiave GPG che l'agente è autorizzato a utilizzare.</string>
     <string name="gpg_agent_setup_step_2_title">2. Configura GNUPGHOME</string>
     <string name="gpg_agent_setup_step_2_text">Esegui i comandi GnuPG da una shell che punta alla home dell'agente di Keyguard. Keyguard è in ascolto sul socket dell'agente che GnuPG risolve per questa home.</string>
-    <string name="gpg_agent_setup_linux_home_fallback_note">Se XDG_RUNTIME_DIR non è impostato, utilizza invece questo percorso di ripiego:</string>
     <string name="gpg_agent_setup_step_3_title">3. Importa la chiave pubblica</string>
     <string name="gpg_agent_setup_step_3_text">Esporta la chiave pubblica dall'elemento Chiave GPG in Keyguard, quindi importala in questa home GnuPG. Questo espone solo il materiale della chiave pubblica.</string>
     <string name="gpg_agent_setup_step_4_title">4. Verifica</string>
@@ -1871,12 +1950,19 @@
     <string name="gpg_key_status">Stato della chiave GPG</string>
     <string name="gpg_key_status_revoked_text">Questa chiave GPG è stata revocata e non dovrebbe essere utilizzata.</string>
     <string name="gpg_key_status_expired_text">Questa chiave GPG è scaduta e non dovrebbe essere utilizzata.</string>
+    <string name="gpg_key_status_weak_self_signature_title">Weak self-signature</string>
+    <string name="gpg_key_status_weak_self_signature_text">This key's self-signatures use a weak algorithm (SHA-1). Renew the key to re-sign it with a modern one.</string>
+    <string name="gpg_key_status_unauthenticated_self_signature_title">No acceptable self-signature</string>
+    <string name="gpg_key_status_unauthenticated_self_signature_text">This key cannot be renewed because its self-signature is missing, invalid, or rejected by security policy.</string>
     <string name="gpg_key_user_ids">ID utente</string>
     <string name="gpg_key_does_not_expire">Non scade</string>
     <string name="gpg_key_capability_encrypt_decrypt">Crittografia/decrittografia</string>
     <string name="gpg_key_sec_pub">sec/pub</string>
     <string name="gpg_key_secret_key">Chiave segreta</string>
     <string name="gpg_key_subkey_n">Sottochiave <xliff:g id="index" example="1">%1$d</xliff:g></string>
+    <string name="gpg_tools_public_key_invalid">Paste valid armored public certificates. Unsupported or incomplete input cannot be added.</string>
+    <string name="gpg_tools_public_key_private">Paste public certificates only. Private keys cannot be added here.</string>
+    <string name="gpg_tools_public_key_not_encryptable">Every recipient must have a currently usable encryption key.</string>
     <string name="gpg_tools_header_title">Strumenti GPG</string>
     <string name="gpg_tools_scope_text">Testo</string>
     <string name="gpg_tools_scope_file">File</string>
@@ -1908,6 +1994,7 @@
     <string name="gpg_tools_clear_file">Pulisci</string>
     <string name="gpg_tools_run_success">Operazione GPG completata</string>
     <string name="gpg_tools_valid_signature">Firma valida</string>
+    <string name="gpg_tools_invalid_input">Could not read the OpenPGP input. Check the message, signature, and selected keys.</string>
     <string name="gpg_tools_invalid_signature">Firma non valida</string>
     <string name="gpg_tools_missing_public_key">Chiave pubblica mancante</string>
     <string name="gpg_tools_signature_by">Firmato da <xliff:g id="signer" example="0123 ABCD">%1$s</xliff:g></string>
@@ -1915,6 +2002,10 @@
     <string name="gpg_tools_warning_key_revoked">Attenzione: la chiave di firma è revocata</string>
     <string name="gpg_tools_warning_key_expired">Attenzione: la chiave di firma è scaduta</string>
     <string name="gpg_tools_warning_signature_expired">Attenzione: la firma è scaduta</string>
+    <string name="gpg_tools_warning_policy_conflict">Warning: signing key has conflicting policy information</string>
+    <string name="gpg_tools_warning_weak_digest">Warning: signature uses a weak digest algorithm</string>
+    <string name="gpg_tools_warning_weak_rsa_decryption_key">Warning: message was decrypted with a weak RSA key</string>
+    <string name="gpg_tools_warning_elgamal_decryption_key">Warning: message was decrypted with a legacy ElGamal key</string>
     <string name="gpg_tools_file_required">Scegli un file di input</string>
     <string name="gpg_tools_signature_file_required">Scegli un file della firma</string>
     <string name="gpg_tools_text_required">Inserisci il testo da elaborare</string>
@@ -1930,8 +2021,11 @@
     <string name="gpg_keyserver_search_index_label">Indice</string>
     <string name="gpg_keyserver_search_public_key_not_found_title">Chiave pubblica GPG non trovata sul keyserver</string>
     <string name="gpg_keyserver_upload_success_title">Chiave pubblica GPG caricata</string>
+    <string name="gpg_keyserver_upload_verify_already_published_text">The selected e-mail addresses are already verified.</string>
     <string name="gpg_keyserver_refresh_success_title">Chiave pubblica GPG aggiornata</string>
     <string name="gpg_keyserver_refresh_not_found_title">Chiave pubblica GPG non trovata sul keyserver</string>
+    <string name="gpg_keyserver_refresh_failed_title">Could not refresh GPG public key</string>
+    <string name="gpg_keyserver_refresh_skipped_title">GPG public key cannot be refreshed</string>
     <string name="gpg_keyserver_verify_unknown_title">Lo stato di verifica della chiave pubblica GPG è sconosciuto</string>
     <string name="gpg_keyserver_verify_not_found_title">Chiave pubblica GPG non trovata sul keyserver</string>
     <string name="gpg_keyserver_verify_unverified_title">Chiave pubblica GPG trovata senza e-mail verificata</string>

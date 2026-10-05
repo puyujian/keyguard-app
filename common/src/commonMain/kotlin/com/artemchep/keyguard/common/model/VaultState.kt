@@ -2,9 +2,9 @@ package com.artemchep.keyguard.common.model
 
 import arrow.core.Either
 import com.artemchep.keyguard.common.io.IO
+import com.artemchep.keyguard.common.service.vault.VaultSession
 import com.artemchep.keyguard.platform.LeBiometricCipher
 import kotlin.time.Instant
-import org.kodein.di.DI
 
 sealed interface VaultState {
     class Create(
@@ -27,6 +27,7 @@ sealed interface VaultState {
         val unlockWithBiometric: WithBiometric?,
         val unlockWithYubiKey: WithYubiKey?,
         val lockInfo: LockInfo?,
+        val unlockWithFido2: WithFido2? = null,
     ) : VaultState {
         class WithPassword(
             val getCreateIo: (String) -> IO<Unit>,
@@ -35,12 +36,23 @@ sealed interface VaultState {
         class WithBiometric(
             val getCipher: suspend () -> Either<Throwable, LeBiometricCipher>,
             val getCreateIo: () -> IO<Unit>,
+            /**
+             * Handles a failed biometric prompt. The returned IO
+             * always fails with the given exception, after any
+             * clean-up the failure requires.
+             */
+            val getFailureIo: (BiometricAuthException) -> IO<Unit>,
             val requireConfirmation: Boolean,
         )
 
         class WithYubiKey(
             val slot: Int,
             val challenge: ByteArray,
+            val getCreateIo: (ByteArray) -> IO<Unit>,
+        )
+
+        class WithFido2(
+            val getRequest: () -> com.artemchep.keyguard.util.fido2.Fido2Operation.Derive,
             val getCreateIo: (ByteArray) -> IO<Unit>,
         )
 
@@ -54,7 +66,7 @@ sealed interface VaultState {
     class Main(
         val masterKey: MasterKey,
         val changePassword: ChangePassword,
-        val di: DI,
+        val session: VaultSession,
     ) : VaultState {
         class ChangePassword(
             private val key: Any,
@@ -92,6 +104,7 @@ sealed interface VaultState {
 
             other as Main
 
+            if (session.id != other.session.id) return false
             if (masterKey != other.masterKey) return false
             if (changePassword != other.changePassword) return false
 
@@ -99,7 +112,8 @@ sealed interface VaultState {
         }
 
         override fun hashCode(): Int {
-            var result = masterKey.hashCode()
+            var result = session.id.hashCode()
+            result = 31 * result + masterKey.hashCode()
             result = 31 * result + changePassword.hashCode()
             return result
         }

@@ -8,6 +8,7 @@ import arrow.core.partially1
 import com.artemchep.keyguard.common.io.effectMap
 import com.artemchep.keyguard.common.io.launchIn
 import com.artemchep.keyguard.common.model.AccountId
+import com.artemchep.keyguard.common.model.CipherFilterContext
 import com.artemchep.keyguard.common.model.DCollection
 import com.artemchep.keyguard.common.model.DSecret
 import com.artemchep.keyguard.common.model.DSecretDuplicateGroup
@@ -17,8 +18,10 @@ import com.artemchep.keyguard.common.model.ToastMessage
 import com.artemchep.keyguard.common.model.canDelete
 import com.artemchep.keyguard.common.model.canEdit
 import com.artemchep.keyguard.common.model.getShapeState
+import com.artemchep.keyguard.common.model.isWatchtowerEligible
 import com.artemchep.keyguard.common.service.clipboard.ClipboardService
 import com.artemchep.keyguard.common.usecase.CipherDuplicatesCheck
+import com.artemchep.keyguard.common.usecase.CipherMerge
 import com.artemchep.keyguard.common.usecase.CipherToolbox
 import com.artemchep.keyguard.common.usecase.GetAppIcons
 import com.artemchep.keyguard.common.usecase.GetCanWrite
@@ -31,10 +34,10 @@ import com.artemchep.keyguard.common.usecase.GetTotpCode
 import com.artemchep.keyguard.common.usecase.GetWebsiteIcons
 import com.artemchep.keyguard.common.usecase.filterHiddenProfiles
 import com.artemchep.keyguard.common.util.flow.persistingStateIn
-import com.artemchep.keyguard.feature.confirmation.ConfirmationRouteFactory
 import com.artemchep.keyguard.feature.attachments.SelectableItemState
 import com.artemchep.keyguard.feature.attachments.SelectableItemStateRaw
-import com.artemchep.keyguard.feature.confirmation.elevatedaccess.createElevatedAccessDialogIntent
+import com.artemchep.keyguard.feature.confirmation.ConfirmationRouteFactory
+import com.artemchep.keyguard.feature.confirmation.elevatedaccess.createElevatedAccessVerify
 import com.artemchep.keyguard.feature.duplicates.DuplicatesRoute
 import com.artemchep.keyguard.feature.generator.history.mapLatestScoped
 import com.artemchep.keyguard.feature.home.vault.model.VaultItem2
@@ -65,8 +68,8 @@ import com.artemchep.keyguard.feature.localization.wrap
 import com.artemchep.keyguard.feature.navigation.NavigationIntent
 import com.artemchep.keyguard.feature.navigation.state.RememberStateFlowScope
 import com.artemchep.keyguard.feature.navigation.state.produceScreenState
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.FlatItemAction
 import com.artemchep.keyguard.ui.Selection
 import com.artemchep.keyguard.ui.icons.KeyguardFavourite
@@ -75,6 +78,7 @@ import com.artemchep.keyguard.ui.icons.icon
 import com.artemchep.keyguard.ui.selection.SelectionHandle
 import com.artemchep.keyguard.ui.selection.selectionHandle
 import kotlinx.collections.immutable.toPersistentList
+import kotlinx.collections.immutable.toPersistentSet
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -82,15 +86,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import org.kodein.di.DirectDI
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
-import org.kodein.di.instance
+import org.koin.compose.currentKoinScope
 
 private data class ConfigMapper(
     val concealFields: Boolean,
     val appIcons: Boolean,
     val websiteIcons: Boolean,
+    val canWrite: Boolean,
 )
 
 private data class SelectionData(
@@ -101,29 +103,29 @@ private data class SelectionData(
 @Composable
 fun produceDuplicatesListState(
     args: DuplicatesRoute.Args,
-) = with(localDI().direct) {
+) = with(currentKoinScope()) {
     produceDuplicatesListState(
-        directDI = this,
+        filterContext = get(),
         args = args,
-        clipboardService = instance(),
-        getTotpCode = instance(),
-        getConcealFields = instance(),
-        getAppIcons = instance(),
-        getWebsiteIcons = instance(),
-        getOrganizations = instance(),
-        getCollections = instance(),
-        getCiphers = instance(),
-        getProfiles = instance(),
-        getCanWrite = instance(),
-        cipherToolbox = instance(),
-        cipherDuplicatesCheck = instance(),
-        confirmationRouteFactory = instance(),
+        clipboardService = get(),
+        getTotpCode = get(),
+        getConcealFields = get(),
+        getAppIcons = get(),
+        getWebsiteIcons = get(),
+        getOrganizations = get(),
+        getCollections = get(),
+        getCiphers = get(),
+        getProfiles = get(),
+        getCanWrite = get(),
+        cipherToolbox = get(),
+        cipherDuplicatesCheck = get(),
+        confirmationRouteFactory = get(),
     )
 }
 
 @Composable
 fun produceDuplicatesListState(
-    directDI: DirectDI,
+    filterContext: CipherFilterContext,
     args: DuplicatesRoute.Args,
     clipboardService: ClipboardService,
     getTotpCode: GetTotpCode,
@@ -148,7 +150,7 @@ fun produceDuplicatesListState(
     ),
 ) {
     duplicatesListStateProducer(
-        directDI = directDI,
+        filterContext = filterContext,
         args = args,
         clipboardService = clipboardService,
         getTotpCode = getTotpCode,
@@ -167,7 +169,7 @@ fun produceDuplicatesListState(
 }
 
 suspend fun RememberStateFlowScope.duplicatesListStateProducer(
-    directDI: DirectDI,
+    filterContext: CipherFilterContext,
     args: DuplicatesRoute.Args,
     clipboardService: ClipboardService,
     getTotpCode: GetTotpCode,
@@ -234,11 +236,13 @@ suspend fun RememberStateFlowScope.duplicatesListStateProducer(
         getConcealFields(),
         getAppIcons(),
         getWebsiteIcons(),
-    ) { concealFields, appIcons, websiteIcons ->
+        getCanWrite(),
+    ) { concealFields, appIcons, websiteIcons, canWrite ->
         ConfigMapper(
             concealFields = concealFields,
             appIcons = appIcons,
             websiteIcons = websiteIcons,
+            canWrite = canWrite,
         )
     }.distinctUntilChanged()
 
@@ -261,11 +265,11 @@ suspend fun RememberStateFlowScope.duplicatesListStateProducer(
     val ciphersFlow = ciphersRawFlow
         .map { ciphers ->
             ciphers
-                .filter { it.deletedDate == null }
+                .filter { it.isWatchtowerEligible }
                 .run {
                     val filter = args.filter
                     if (filter != null) {
-                        val predicate = filter.prepare(directDI, ciphers)
+                        val predicate = filter.prepare(filterContext, ciphers)
                         filter(predicate)
                     } else {
                         this
@@ -371,29 +375,25 @@ suspend fun RememberStateFlowScope.duplicatesListStateProducer(
                             id = group.id,
                         )
                     }
+                    val mergeButton = createMergeButtonOrNull(
+                        group = group,
+                        ciphers = groupedItems
+                            .map { it.source },
+                        cipherMerge = cipherToolbox.cipherMerge,
+                        canWrite = cfg.canWrite,
+                    )
+                    // The merge button closes the group.
+                    val shapeMask = if (mergeButton != null) ShapeState.START else ShapeState.ALL
                     allItems += groupedItems
                         .mapIndexed { index, item ->
                             val shapeState = getShapeState(
                                 list = groupedItems,
                                 index = index,
                                 predicate = { _, _ -> true },
-                            ) and ShapeState.START
+                            ) and shapeMask
                             item.withShape(shapeState)
                         }
-                    allItems += VaultItem2.Button(
-                        id = "merge." + group.id,
-                        title = translate(Res.string.ciphers_action_merge_title),
-                        shapeState = ShapeState.END,
-                        leading = icon(Icons.Outlined.Merge, Icons.Outlined.Add),
-                        onClick = {
-                            val ciphers = groupedItems
-                                .map { it.source }
-                            cipherMergeInto(
-                                cipherMerge = cipherToolbox.cipherMerge,
-                                ciphers = ciphers,
-                            )
-                        },
-                    )
+                    allItems += listOfNotNull(mergeButton)
                     allItems
                 }
         }
@@ -431,6 +431,40 @@ suspend fun RememberStateFlowScope.duplicatesListStateProducer(
             )
             Loadable.Ok(state)
         }
+}
+
+private suspend fun RememberStateFlowScope.createMergeButtonOrNull(
+    group: DSecretDuplicateGroup,
+    ciphers: List<DSecret>,
+    cipherMerge: CipherMerge,
+    canWrite: Boolean,
+): VaultItem2.Button? {
+    if (!canWrite) {
+        return null
+    }
+
+    val verify = createElevatedAccessVerify(
+        required = ciphers.any { it.reprompt },
+    )
+    return VaultItem2.Button(
+        id = "merge." + group.id,
+        title = translate(Res.string.ciphers_action_merge_title),
+        shapeState = ShapeState.END,
+        leading = icon(Icons.Outlined.Merge, Icons.Outlined.Add),
+        onClick = {
+            val block = {
+                cipherMergeInto(
+                    cipherMerge = cipherMerge,
+                    ciphers = ciphers,
+                )
+            }
+            if (verify != null) {
+                verify(block)
+            } else {
+                block()
+            }
+        },
+    )
 }
 
 fun RememberStateFlowScope.createCipherSelectionFlow(
@@ -510,17 +544,9 @@ private fun RememberStateFlowScope.createCipherSelectionFlow(
     val canEdit = canWrite && !hasCanNotEditCiphers && !hasCanNotWriteCiphers
     val canDelete = canWrite && !hasCanNotDeleteCiphers && !hasCanNotWriteCiphers
 
-    val verify: ((() -> Unit) -> Unit)? = if (hasRepromptCiphers) {
-        // lambda
-        { block ->
-            val intent = createElevatedAccessDialogIntent {
-                block()
-            }
-            navigate(intent)
-        }
-    } else {
-        null
-    }
+    val verify = createElevatedAccessVerify(
+        required = hasRepromptCiphers,
+    )
 
     val actions = mutableListOf<FlatItemAction>()
     // If any of the ciphers can be favourite-d, then we
@@ -707,5 +733,6 @@ private fun RememberStateFlowScope.createCipherSelectionFlow(
         count = selectedCiphers.size,
         actions = actions.toPersistentList(),
         onClear = selectionHandle::clearSelection,
+        selectedIds = existingSelectedCipherIds.toPersistentSet(),
     )
 }

@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalDensity
@@ -31,61 +32,70 @@ import androidx.compose.ui.window.isTraySupported
 import arrow.core.throwIfFatal
 import coil3.SingletonImageLoader
 import com.artemchep.keyguard.common.AppWorker
-import com.artemchep.keyguard.common.di.imageLoaderModule
-import com.artemchep.keyguard.common.di.setFromDi
+import com.artemchep.keyguard.common.di.ImageLoadingModule
+import com.artemchep.keyguard.common.di.setFromKoin
 import com.artemchep.keyguard.common.io.attempt
 import com.artemchep.keyguard.common.io.bind
+import com.artemchep.keyguard.common.model.AgentStatus
 import com.artemchep.keyguard.common.model.MasterSession
 import com.artemchep.keyguard.common.model.PersistedSession
 import com.artemchep.keyguard.common.model.ToastMessage
+import com.artemchep.keyguard.common.service.Files
 import com.artemchep.keyguard.common.service.app.AppIconFetcher
 import com.artemchep.keyguard.common.service.app.AppIconKeyer
 import com.artemchep.keyguard.common.service.autotype.AutotypeService
+import com.artemchep.keyguard.common.service.clipboard.ClipboardEventBus
+import com.artemchep.keyguard.common.service.clipboard.ClipboardService
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
+import com.artemchep.keyguard.common.service.gpgagent.GpgAgentManager
+import com.artemchep.keyguard.common.service.gpgagent.GpgAgentStatusService
+import com.artemchep.keyguard.common.service.gpgagent.GpgPublicKeyRepository
+import com.artemchep.keyguard.common.service.gpgagent.retryGpgAgentStartup
 import com.artemchep.keyguard.common.service.keyboard.KeyboardShortcutsService
 import com.artemchep.keyguard.common.service.keychain.KeychainRepository
+import com.artemchep.keyguard.common.service.keyvalue.KeyValueStoreFactory
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.notification.NotificationRepository
+import com.artemchep.keyguard.common.service.pendinghistory.PendingUsageHistoryQueue
 import com.artemchep.keyguard.common.service.quicksearch.DesktopLibGlobalHotKeyRegistrar
 import com.artemchep.keyguard.common.service.quicksearch.QuickSearchHotkeyService
 import com.artemchep.keyguard.common.service.quicksearch.QuickSearchWindowManager
 import com.artemchep.keyguard.common.service.session.VaultLockHotkeyService
+import com.artemchep.keyguard.common.service.session.VaultPowerLockService
 import com.artemchep.keyguard.common.service.session.VaultSessionLocker
-import com.artemchep.keyguard.common.service.gpgagent.GpgAgentManager
-import com.artemchep.keyguard.common.service.gpgagent.GpgPublicKeyRepository
-import com.artemchep.keyguard.common.service.gpgagent.GpgAgentStatusService
-import com.artemchep.keyguard.common.service.gpgagent.retryGpgAgentStartup
-import com.artemchep.keyguard.common.service.sshagent.retrySshAgentStartup
-import com.artemchep.keyguard.common.service.sshagent.SshAgentStatusService
-import com.artemchep.keyguard.common.service.sshagent.SshAgentPublicKeyRepository
-import com.artemchep.keyguard.common.service.vault.KeyReadWriteRepository
-import com.artemchep.keyguard.common.service.pendinghistory.PendingUsageHistoryQueue
 import com.artemchep.keyguard.common.service.sshagent.SshAgentManager
-import com.artemchep.keyguard.common.model.AgentStatus
-import com.artemchep.keyguard.common.service.clipboard.ClipboardEventBus
-import com.artemchep.keyguard.common.service.clipboard.ClipboardService
-import com.artemchep.keyguard.feature.agent.rememberAgentRequestUiState
+import com.artemchep.keyguard.common.service.sshagent.SshAgentPublicKeyRepository
+import com.artemchep.keyguard.common.service.sshagent.SshAgentStatusService
+import com.artemchep.keyguard.common.service.sshagent.retrySshAgentStartup
+import com.artemchep.keyguard.common.service.vault.KeyReadWriteRepository
 import com.artemchep.keyguard.common.usecase.ClearVaultSession
 import com.artemchep.keyguard.common.usecase.GetAccounts
 import com.artemchep.keyguard.common.usecase.GetCloseToTray
 import com.artemchep.keyguard.common.usecase.GetGpgAgent
-import com.artemchep.keyguard.common.usecase.GetGpgAgentApprovalWindow
 import com.artemchep.keyguard.common.usecase.GetGpgAgentApprovalCachePolicy
+import com.artemchep.keyguard.common.usecase.GetGpgAgentApprovalWindow
 import com.artemchep.keyguard.common.usecase.GetGpgAgentFilter
 import com.artemchep.keyguard.common.usecase.GetLocale
 import com.artemchep.keyguard.common.usecase.GetMinimizeOnCopy
 import com.artemchep.keyguard.common.usecase.GetSshAgent
-import com.artemchep.keyguard.common.usecase.GetSshAgentApprovalWindow
 import com.artemchep.keyguard.common.usecase.GetSshAgentApprovalCachePolicy
+import com.artemchep.keyguard.common.usecase.GetSshAgentApprovalWindow
 import com.artemchep.keyguard.common.usecase.GetSshAgentFilter
 import com.artemchep.keyguard.common.usecase.GetVaultPersist
 import com.artemchep.keyguard.common.usecase.GetVaultSession
 import com.artemchep.keyguard.common.usecase.PutVaultSession
 import com.artemchep.keyguard.common.usecase.ShowMessage
+import com.artemchep.keyguard.common.worker.WorkerRegistry
 import com.artemchep.keyguard.common.worker.Wrker
 import com.artemchep.keyguard.copy.DataDirectory
-import com.artemchep.keyguard.core.session.diFingerprintRepositoryModule
+import com.artemchep.keyguard.core.session.PlatformApplicationModule
+import com.artemchep.keyguard.core.session.usecase.PlatformVaultModule
 import com.artemchep.keyguard.desktop.WindowStateManager
+import com.artemchep.keyguard.desktop.instance.DesktopInstance
+import com.artemchep.keyguard.desktop.instance.instanceFailureDetails
+import com.artemchep.keyguard.desktop.instance.showInstanceFailure
+import com.artemchep.keyguard.desktop.nativebundle.NATIVE_PACKAGED_SMOKE_ARGUMENT
+import com.artemchep.keyguard.desktop.nativebundle.runNativePackagedSmoke
 import com.artemchep.keyguard.desktop.services.autotype.AutotypeServiceNative
 import com.artemchep.keyguard.desktop.services.keychain.KeychainRepositoryNative
 import com.artemchep.keyguard.desktop.services.notification.NotificationRepositoryNative
@@ -93,17 +103,24 @@ import com.artemchep.keyguard.desktop.ui.GpgRequestWindow
 import com.artemchep.keyguard.desktop.ui.QuickSearchWindow
 import com.artemchep.keyguard.desktop.ui.SshRequestWindow
 import com.artemchep.keyguard.desktop.util.AppReopenedListenerEffect
+import com.artemchep.keyguard.desktop.util.awaitVisible
 import com.artemchep.keyguard.desktop.util.handleNavigationIntent
+import com.artemchep.keyguard.desktop.util.requestAppForeground
+import com.artemchep.keyguard.desktop.util.requestFocusWithRetry
+import com.artemchep.keyguard.di.GlobalModuleCommon
+import com.artemchep.keyguard.di.VaultModuleCommon
+import com.artemchep.keyguard.di.resolve
+import com.artemchep.keyguard.feature.agent.rememberAgentRequestUiState
 import com.artemchep.keyguard.feature.favicon.Favicon
 import com.artemchep.keyguard.feature.keyguard.AppRoute
 import com.artemchep.keyguard.feature.loading.getErrorReadableMessage
+import com.artemchep.keyguard.feature.navigation.BackHandler
 import com.artemchep.keyguard.feature.navigation.LocalNavigationBackHandler
 import com.artemchep.keyguard.feature.navigation.NavigationController
+import com.artemchep.keyguard.feature.navigation.NavigationModule
 import com.artemchep.keyguard.feature.navigation.NavigationNode
 import com.artemchep.keyguard.feature.navigation.NavigationRouterBackHandler
 import com.artemchep.keyguard.feature.navigation.state.TranslatorScope
-import com.artemchep.keyguard.nativecrypto.NativeCryptoDesktopSmoke
-import com.artemchep.keyguard.nativecrypto.NativeCryptoException
 import com.artemchep.keyguard.platform.LeContext
 import com.artemchep.keyguard.platform.LocalWindowId
 import com.artemchep.keyguard.platform.WindowId
@@ -111,9 +128,8 @@ import com.artemchep.keyguard.platform.lifecycle.LaunchLifecycleProviderEffect
 import com.artemchep.keyguard.platform.lifecycle.LeLifecycleState
 import com.artemchep.keyguard.platform.lifecycle.LePlatformLifecycleProvider
 import com.artemchep.keyguard.platform.lifecycle.onState
-import com.artemchep.keyguard.platform.util.isRelease
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.LocalComposeWindow
 import com.artemchep.keyguard.ui.WindowScreenshotProtectionEffect
 import com.artemchep.keyguard.ui.surface.LocalBackgroundManager
@@ -123,12 +139,15 @@ import com.artemchep.keyguard.ui.theme.KeyguardTheme
 import com.artemchep.keyguard.ui.theme.LocalExpressive
 import com.artemchep.keyguard.ui.theme.combineAlpha
 import com.artemchep.keyguard.util.foundation.crypto.ensurePlatformCryptoReady
-import com.kdroid.composetray.tray.api.Tray
-import com.kdroid.composetray.utils.SingleInstanceManager
+import dev.nucleusframework.composenativetray.tray.api.Tray
+import java.util.Locale
+import kotlin.system.exitProcess
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -142,167 +161,94 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
-import kotlin.time.Clock
-import okhttp3.OkHttpClient
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.DI
-import org.kodein.di.allInstances
-import org.kodein.di.bindSingleton
-import org.kodein.di.compose.rememberInstance
-import org.kodein.di.compose.withDI
-import org.kodein.di.direct
-import org.kodein.di.instance
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption
-import java.util.Locale
-import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLSocket
-import kotlin.system.exitProcess
-import kotlin.time.ExperimentalTime
-
-private const val NATIVE_CRYPTO_PACKAGED_SMOKE_ARGUMENT = "--native-crypto-packaged-smoke"
-private const val NATIVE_CRYPTO_PACKAGED_SMOKE_RESULT_PATH_ENV =
-    "KEYGUARD_NATIVE_CRYPTO_SMOKE_RESULT_PATH"
-private const val NATIVE_CRYPTO_PACKAGED_SMOKE_NONCE_ENV =
-    "KEYGUARD_NATIVE_CRYPTO_SMOKE_NONCE"
+import org.koin.compose.KoinIsolatedContext
+import org.koin.compose.koinInject
+import org.koin.core.qualifier.named
+import org.koin.dsl.koinApplication
+import org.koin.dsl.module
 
 fun main(args: Array<String>) {
-    if (NATIVE_CRYPTO_PACKAGED_SMOKE_ARGUMENT in args) {
-        runNativeCryptoPackagedSmoke()
+    if (NATIVE_PACKAGED_SMOKE_ARGUMENT in args) {
+        runNativePackagedSmoke()
         return
     }
-    runKeyguardApplication()
-}
-
-private fun runNativeCryptoPackagedSmoke() {
-    val (result, tlsRuntime) = try {
-        NativeCryptoDesktopSmoke.runPackaged() to verifyPackagedDesktopTls()
-    } catch (e: NativeCryptoException) {
-        System.err.println(
-            "nativeCrypto packaged smoke failed: operation=${e.operation} code=${e.code}",
-        )
-        exitProcess(1)
-    } catch (_: Throwable) {
-        System.err.println("nativeCrypto packaged smoke failed: operation=packaged_smoke code=INTERNAL")
+    val instance = try {
+        DesktopInstance.acquire()
+    } catch (e: Exception) {
+        showInstanceFailure(e)
         exitProcess(1)
     }
-
-    val capabilities = result.capabilities.joinToString(",") { capability -> capability.name }
-    val success =
-        "nativeCrypto packaged smoke passed: abi=${result.abiVersion} " +
-            "capabilities=$capabilities sha256=PASS tls=$tlsRuntime"
-    publishNativeCryptoPackagedSmokeResult(success)
-    println(success)
-}
-
-private fun publishNativeCryptoPackagedSmokeResult(success: String) {
-    val resultPath = System.getenv(NATIVE_CRYPTO_PACKAGED_SMOKE_RESULT_PATH_ENV)
-        ?.takeIf(String::isNotBlank)
         ?: return
-    val nonce = checkNotNull(
-        System.getenv(NATIVE_CRYPTO_PACKAGED_SMOKE_NONCE_ENV)
-            ?.takeIf(String::isNotBlank),
-    ) {
-        "$NATIVE_CRYPTO_PACKAGED_SMOKE_NONCE_ENV is required when publishing smoke evidence"
+    try {
+        runKeyguardApplication(instance)
+    } finally {
+        // Compose exits the JVM directly. Do not release ownership while GlobalScope workers
+        // can still access shared state; the OS reclaims the locks at process termination.
+        instance.stop()
     }
-    Files.writeString(
-        Path.of(resultPath),
-        "$nonce\n$success\n",
-        StandardCharsets.UTF_8,
-        StandardOpenOption.CREATE_NEW,
-        StandardOpenOption.WRITE,
-    )
 }
 
-private fun verifyPackagedDesktopTls(): String {
-    val jdkFeature = Runtime.version().feature()
-    check(jdkFeature == 21)
-
-    val defaultContext = SSLContext.getDefault()
-    val providerName = defaultContext.provider.name
-    check(providerName == "SunJSSE")
-
-    val okHttpClient = OkHttpClient.Builder().build()
-    val socketFactory = okHttpClient.sslSocketFactory
-    check(socketFactory.javaClass == defaultContext.socketFactory.javaClass)
-    val tlsSocket = socketFactory.createSocket() as SSLSocket
-    tlsSocket.use { socket ->
-        check("TLSv1.3" in socket.enabledProtocols)
+internal fun createDesktopKoinApplication(): org.koin.core.KoinApplication {
+    val images = ImageLoadingModule { scope ->
+        add(AppIconFetcher.Factory(scope.get(), scope.get()))
+        add(AppIconKeyer())
     }
+    return koinApplication {
+        allowOverride(false)
+        modules(
+            GlobalModuleCommon().module,
+            VaultModuleCommon().module,
+            PlatformVaultModule().module,
+            PlatformApplicationModule().module,
+            NavigationModule().module,
+            images.module,
+            DesktopApplicationModule().module,
+        )
+    }
+}
 
-    return "OkHttp/$providerName/JDK$jdkFeature"
+private class DesktopApplicationModule {
+    val module = module {
+        single { WindowStateManager(get<KeyValueStoreFactory>().get(Files.WINDOW_STATE), get()) }
+        single { QuickSearchWindowManager() }
+        single<KeychainRepository> { KeychainRepositoryNative() }
+        single<AutotypeService> { AutotypeServiceNative() }
+        single<NotificationRepository> { NotificationRepositoryNative(get()) }
+    }
 }
 
 @OptIn(ExperimentalTime::class)
-private fun runKeyguardApplication() {
+private fun runKeyguardApplication(desktopInstance: DesktopInstance) {
     ensurePlatformCryptoReady()
 
     // Allow the app to use system default proxies:
     // https://docs.oracle.com/javase/8/docs/technotes/guides/net/proxies.html
     System.setProperty("java.net.useSystemProxies", "true")
 
-    val appDi = DI.invoke {
-        import(diFingerprintRepositoryModule())
-
-        val imageLoaderModule = imageLoaderModule { directDI ->
-            val appIconFactory = AppIconFetcher.Factory(
-                googlePlayParser = directDI.instance(),
-                getWebsiteIcons = directDI.instance(),
-            )
-            add(appIconFactory)
-            add(AppIconKeyer())
-        }
-        import(imageLoaderModule)
-        bindSingleton {
-            WindowStateManager(this)
-        }
-        bindSingleton {
-            QuickSearchWindowManager()
-        }
-        bindSingleton<KeychainRepository> {
-            KeychainRepositoryNative(
-                directDI = this,
-            )
-        }
-        bindSingleton<AutotypeService> {
-            AutotypeServiceNative(
-                directDI = this,
-            )
-        }
-        bindSingleton<NotificationRepository> {
-            NotificationRepositoryNative(
-                directDI = this,
-            )
-        }
-    }
+    val koinApplication = createDesktopKoinApplication()
+    val koin = koinApplication.koin
 
     // Construct the image loader singleton to match what
     // we have set in the application's DI.
-    SingletonImageLoader.setFromDi(appDi)
-
-    // Allow different builds to be run side-by-side.
-    SingleInstanceManager.configuration = SingleInstanceManager.Configuration(
-        lockIdentifier = if (isRelease) "keyguard" else "keyguard-dev",
-    )
+    SingletonImageLoader.setFromKoin(koin)
 
     val processLifecycleProvider = LePlatformLifecycleProvider(
         scope = GlobalScope,
-        cryptoGenerator = appDi.direct.instance(),
+        cryptoGenerator = koin.get(),
     )
 
-    val logRepository by appDi.di.instance<LogRepository>()
-    val cryptoGenerator by appDi.di.instance<CryptoGenerator>()
-    val getVaultSession by appDi.di.instance<GetVaultSession>()
-    val putVaultSession by appDi.di.instance<PutVaultSession>()
-    val getVaultPersist by appDi.di.instance<GetVaultPersist>()
-    val keyReadWriteRepository by appDi.di.instance<KeyReadWriteRepository>()
+    val logRepository by lazy { koin.get<LogRepository>() }
+    val cryptoGenerator by lazy { koin.get<CryptoGenerator>() }
+    val getVaultSession by lazy { koin.get<GetVaultSession>() }
+    val putVaultSession by lazy { koin.get<PutVaultSession>() }
+    val getVaultPersist by lazy { koin.get<GetVaultPersist>() }
+    val keyReadWriteRepository by lazy { koin.get<KeyReadWriteRepository>() }
     getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<GetAccounts>()
+            key?.session?.resolve { get<GetAccounts>() }
         }
         .mapLatest { getAccounts ->
             if (getAccounts != null) {
@@ -315,7 +261,7 @@ private fun runKeyguardApplication() {
 
     // locale
     val systemLocale = Locale.getDefault()
-    val getLocale by appDi.di.instance<GetLocale>()
+    val getLocale by lazy { koin.get<GetLocale>() }
     getLocale()
         .onEach { locale ->
             val newLocale = when (locale) {
@@ -365,13 +311,13 @@ private fun runKeyguardApplication() {
         }
         .launchIn(GlobalScope)
 
-    val appWorker by appDi.di.instance<AppWorker>(tag = AppWorker.Feature.SYNC)
+    val appWorker by lazy { koin.get<AppWorker>(qualifier = named(AppWorker.Feature.SYNC)) }
     val processLifecycleFlow = MutableStateFlow(LeLifecycleState.RESUMED)
     GlobalScope.launch {
         appWorker.launch(this, processLifecycleFlow)
     }
 
-    val workers by appDi.di.allInstances<Wrker>()
+    val workers = koin.get<WorkerRegistry>().values
     GlobalScope.launch {
         workers.forEach {
             it.start(this, processLifecycleFlow)
@@ -379,37 +325,37 @@ private fun runKeyguardApplication() {
     }
 
     // timeout
-    val vaultSessionLocker: VaultSessionLocker by appDi.di.instance()
+    val vaultSessionLocker: VaultSessionLocker by lazy { koin.get() }
     processLifecycleProvider.lifecycleStateFlow
         .onState(minActiveState = LeLifecycleState.RESUMED) {
             vaultSessionLocker.keepAlive()
         }
         .launchIn(GlobalScope)
 
-    val getCloseToTray: GetCloseToTray = appDi.direct.instance()
-    val getSshAgent: GetSshAgent = appDi.direct.instance()
-    val getSshAgentApprovalWindow: GetSshAgentApprovalWindow = appDi.direct.instance()
-    val getSshAgentApprovalCachePolicy: GetSshAgentApprovalCachePolicy = appDi.direct.instance()
-    val getSshAgentFilter: GetSshAgentFilter = appDi.direct.instance()
-    val sshAgentPublicKeyRepository: SshAgentPublicKeyRepository = appDi.direct.instance()
-    val sshAgentStatusService: SshAgentStatusService = appDi.direct.instance()
-    val getGpgAgent: GetGpgAgent = appDi.direct.instance()
-    val getGpgAgentApprovalWindow: GetGpgAgentApprovalWindow = appDi.direct.instance()
-    val getGpgAgentApprovalCachePolicy: GetGpgAgentApprovalCachePolicy = appDi.direct.instance()
-    val getGpgAgentFilter: GetGpgAgentFilter = appDi.direct.instance()
-    val gpgPublicKeyRepository: GpgPublicKeyRepository = appDi.direct.instance()
-    val gpgAgentStatusService: GpgAgentStatusService = appDi.direct.instance()
-    val pendingUsageHistoryQueue: PendingUsageHistoryQueue = appDi.direct.instance()
-    val dataDirectory: DataDirectory = appDi.direct.instance()
+    val getCloseToTray: GetCloseToTray = koin.get()
+    val getSshAgent: GetSshAgent = koin.get()
+    val getSshAgentApprovalWindow: GetSshAgentApprovalWindow = koin.get()
+    val getSshAgentApprovalCachePolicy: GetSshAgentApprovalCachePolicy = koin.get()
+    val getSshAgentFilter: GetSshAgentFilter = koin.get()
+    val sshAgentPublicKeyRepository: SshAgentPublicKeyRepository = koin.get()
+    val sshAgentStatusService: SshAgentStatusService = koin.get()
+    val getGpgAgent: GetGpgAgent = koin.get()
+    val getGpgAgentApprovalWindow: GetGpgAgentApprovalWindow = koin.get()
+    val getGpgAgentApprovalCachePolicy: GetGpgAgentApprovalCachePolicy = koin.get()
+    val getGpgAgentFilter: GetGpgAgentFilter = koin.get()
+    val gpgPublicKeyRepository: GpgPublicKeyRepository = koin.get()
+    val gpgAgentStatusService: GpgAgentStatusService = koin.get()
+    val pendingUsageHistoryQueue: PendingUsageHistoryQueue = koin.get()
+    val dataDirectory: DataDirectory = koin.get()
 
     val translatorScope by lazy {
         val context = LeContext()
         TranslatorScope.of(context)
     }
 
-    val windowStateManager by appDi.di.instance<WindowStateManager>()
+    val windowStateManager by lazy { koin.get<WindowStateManager>() }
     application(exitProcessOnExit = true) {
-        withDI(appDi) {
+        KoinIsolatedContext(koinApplication) {
             val isWindowOpenState = remember {
                 mutableStateOf(true)
             }
@@ -424,19 +370,28 @@ private fun runKeyguardApplication() {
                 }
             }
 
-            // Single instance check - restore existing window
-            // if another instance is attempted.
-            val isSingleInstance = SingleInstanceManager.isSingleInstance(
-                onRestoreRequest = {
+            LaunchedEffect(desktopInstance) {
+                try {
+                    desktopInstance.activations.collect { onWindowOpen() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logRepository.post(
+                        tag = "InstanceService",
+                        message = instanceFailureDetails(e),
+                        level = com.artemchep.keyguard.common.service.logging.LogLevel.ERROR,
+                    )
                     onWindowOpen()
-                },
-            )
-            if (!isSingleInstance) {
-                exitApplication()
-                return@withDI
+                    // Apply visibility before presenting recovery failure. Keep ownership
+                    // until normal JVM exit, including when the user chooses to finish edits.
+                    withFrameNanos { }
+                    if (showInstanceFailure(e, running = true)) {
+                        exitApplication()
+                    }
+                }
             }
 
-            val quickSearchWindowManager by rememberInstance<QuickSearchWindowManager>()
+            val quickSearchWindowManager = koinInject<QuickSearchWindowManager>()
             val quickSearchHotkeyRegistrar = remember {
                 DesktopLibGlobalHotKeyRegistrar(
                     name = "Quick search",
@@ -457,7 +412,7 @@ private fun runKeyguardApplication() {
                 ).start()
                 onDispose(stop)
             }
-            val clearVaultSession by rememberInstance<ClearVaultSession>()
+            val clearVaultSession = koinInject<ClearVaultSession>()
             DisposableEffect(
                 clearVaultSession,
                 vaultLockHotkeyRegistrar,
@@ -470,12 +425,25 @@ private fun runKeyguardApplication() {
                 onDispose(stop)
             }
 
+            val showMessage = koinInject<ShowMessage>()
+            LaunchedEffect(koin) {
+                withContext(Dispatchers.Default) {
+                    VaultPowerLockService(
+                        getVaultLockAfterScreenOff = koin.get(),
+                        sessionRepository = koin.get(),
+                        clearVaultSession = clearVaultSession,
+                        showMessage = showMessage,
+                    ).run()
+                }
+            }
+
             // SSH Agent: Start the SSH agent if the binary is available.
             // The binary is bundled in the app resources during distribution.
             // This is placed after the single-instance check so that a
             // second app instance never touches the shared SSH socket.
             val sshAgentManager = remember {
                 SshAgentManager(
+                    sessionAccess = koin.get(),
                     logRepository = logRepository,
                     cryptoGenerator = cryptoGenerator,
                     getVaultSession = getVaultSession,
@@ -486,7 +454,6 @@ private fun runKeyguardApplication() {
                     pendingUsageHistoryQueue = pendingUsageHistoryQueue,
                 )
             }
-            val showMessage by rememberInstance<ShowMessage>()
             val getSshAgentState = remember { getSshAgent() }
                 .collectAsState(false)
             val getSshAgentStateValue = getSshAgentState.value
@@ -564,6 +531,7 @@ private fun runKeyguardApplication() {
 
             val gpgAgentManager = remember {
                 GpgAgentManager(
+                    sessionAccess = koin.get(),
                     logRepository = logRepository,
                     cryptoGenerator = cryptoGenerator,
                     dataDirectory = dataDirectory,
@@ -719,11 +687,13 @@ private fun ApplicationScope.KeyguardMainWindow(
     onReopenRequest: () -> Unit,
     onCloseRequest: () -> Unit,
 ) {
+    val navigationBackHandler = remember { BackHandler() }
     KeyguardMainWindow(
         processLifecycleProvider = processLifecycleProvider,
         stateManager = stateManager,
         visible = visible,
         onCloseRequest = onCloseRequest,
+        navigationBackHandler = navigationBackHandler,
     ) {
         window.toFront()
 
@@ -734,7 +704,7 @@ private fun ApplicationScope.KeyguardMainWindow(
         }
 
         KeyguardTheme {
-            KeyguardWindowScaffold {
+            KeyguardWindowScaffold(navigationBackHandler = navigationBackHandler) {
                 Content()
             }
         }
@@ -747,10 +717,12 @@ private fun ApplicationScope.KeyguardMainWindow(
     stateManager: WindowStateManager,
     visible: Boolean,
     onCloseRequest: () -> Unit,
+    navigationBackHandler: BackHandler,
     content: @Composable FrameWindowScope.() -> Unit,
 ) {
     val state = stateManager.rememberWindowState()
-    val keyboardShortcutsService by rememberInstance<KeyboardShortcutsService>()
+    val windowIdState = remember { mutableStateOf<WindowId?>(null) }
+    val keyboardShortcutsService = koinInject<KeyboardShortcutsService>()
     Window(
         onCloseRequest = onCloseRequest,
         icon = painterResource(Res.drawable.ic_keyguard),
@@ -758,10 +730,34 @@ private fun ApplicationScope.KeyguardMainWindow(
         visible = visible,
         title = "Keyguard",
         onKeyEvent = { event ->
-            keyboardShortcutsService.handle(event)
+            val windowId = windowIdState.value
+            val handled = windowId != null && keyboardShortcutsService.handle(windowId, event)
+            handled || navigationBackHandler.handleKeyEvent(event)
         },
     ) {
+        val windowId = WindowId(window.windowHandle)
+        // The window-level key callback is declared before the native window is available.
+        DisposableEffect(window, windowId) {
+            windowIdState.value = windowId
+            onDispose {
+                windowIdState.value = null
+            }
+        }
+        LaunchedEffect(stateManager, window) {
+            stateManager.foregroundRequests.collect {
+                state.isMinimized = false
+
+                requestAppForeground()
+                if (window.awaitVisible(tag = "MainWindow")) {
+                    window.requestFocusWithRetry(
+                        tag = "MainWindow",
+                        bringToFront = true,
+                    )
+                }
+            }
+        }
         KeyguardWindowEssentials(
+            windowId = windowId,
             processLifecycleProvider = processLifecycleProvider,
             onMinimizeRequest = {
                 state.isMinimized = true
@@ -773,13 +769,14 @@ private fun ApplicationScope.KeyguardMainWindow(
 
 @Composable
 internal fun FrameWindowScope.KeyguardWindowEssentials(
+    windowId: WindowId,
     processLifecycleProvider: LePlatformLifecycleProvider,
     onMinimizeRequest: () -> Unit,
     content: @Composable FrameWindowScope.() -> Unit,
 ) {
     KeyguardWindowEssentialsProvider(
         window = window,
-        windowId = WindowId(window.windowHandle),
+        windowId = windowId,
         processLifecycleProvider = processLifecycleProvider,
         onMinimizeRequest = onMinimizeRequest,
     ) {
@@ -811,8 +808,8 @@ private fun KeyguardWindowEssentialsProvider(
     onMinimizeRequest: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val clipboardEventBus by rememberInstance<ClipboardEventBus>()
-    val getMinimizeOnCopy by rememberInstance<GetMinimizeOnCopy>()
+    val clipboardEventBus = koinInject<ClipboardEventBus>()
+    val getMinimizeOnCopy = koinInject<GetMinimizeOnCopy>()
 
     val updatedWindowId by rememberUpdatedState(windowId)
     val updatedMinimizeRequest by rememberUpdatedState(onMinimizeRequest)
@@ -861,6 +858,7 @@ private fun KeyguardWindowEssentialsProvider(
 
 @Composable
 internal fun ApplicationScope.KeyguardWindowScaffold(
+    navigationBackHandler: BackHandler,
     content: @Composable () -> Unit,
 ) {
     val containerColor = LocalBackgroundManager.current.colorHighest
@@ -876,6 +874,7 @@ internal fun ApplicationScope.KeyguardWindowScaffold(
         ) {
             Navigation(
                 exitApplication = ::exitApplication,
+                handler = navigationBackHandler,
             ) {
                 content()
             }
@@ -932,12 +931,17 @@ private fun Content() {
 @Composable
 private fun Navigation(
     exitApplication: () -> Unit,
+    handler: BackHandler = remember { BackHandler() },
     block: @Composable () -> Unit,
 ) = NavigationRouterBackHandler(
-    sideEffect = { backHandler ->
-    },
+    handler = handler,
 ) {
-    val showMessage by rememberInstance<ShowMessage>()
+    val showMessage = koinInject<ShowMessage>()
+    val logRepository = koinInject<LogRepository>()
+    val translatorScope = remember {
+        val context = LeContext()
+        TranslatorScope.of(context)
+    }
     NavigationController(
         scope = GlobalScope,
         canPop = flowOf(false),
@@ -946,6 +950,9 @@ private fun Navigation(
                 exitApplication = exitApplication,
                 intent = intent,
                 showMessage = showMessage,
+                translatorScope = translatorScope,
+                logRepository = logRepository,
+                scope = GlobalScope,
             )
         },
     ) { controller ->

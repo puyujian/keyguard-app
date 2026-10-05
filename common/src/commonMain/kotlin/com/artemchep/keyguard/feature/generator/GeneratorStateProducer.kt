@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AccountBox
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Domain
@@ -48,6 +48,8 @@ import com.artemchep.keyguard.common.model.DSecret
 import com.artemchep.keyguard.common.model.GeneratedGpgKey
 import com.artemchep.keyguard.common.model.GetPasswordResult
 import com.artemchep.keyguard.common.model.GpgKeyConfig
+import com.artemchep.keyguard.common.model.GpgKeyVersion
+import com.artemchep.keyguard.common.service.crypto.gpgKeyIdFromFingerprintOrNull
 import com.artemchep.keyguard.common.model.GpgKeyExpiry
 import com.artemchep.keyguard.common.model.KeyPair
 import com.artemchep.keyguard.common.model.KeyPairConfig
@@ -58,25 +60,26 @@ import com.artemchep.keyguard.common.model.getOrNull
 import com.artemchep.keyguard.common.model.isExpensive
 import com.artemchep.keyguard.common.service.clipboard.ClipboardService
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
-import com.artemchep.keyguard.common.usecase.GpgKeyExport
-import com.artemchep.keyguard.common.usecase.GpgKeyPrivateExport
-import com.artemchep.keyguard.common.usecase.GpgKeyPublicExport
-import com.artemchep.keyguard.common.usecase.KeyPairExport
 import com.artemchep.keyguard.common.service.crypto.KeyPairGenerator
-import com.artemchep.keyguard.common.usecase.KeyPrivateExport
-import com.artemchep.keyguard.common.usecase.KeyPublicExport
+import com.artemchep.keyguard.common.service.relays.EmailRelayRegistry
 import com.artemchep.keyguard.common.service.relays.api.EmailRelay
 import com.artemchep.keyguard.common.service.tld.TldService
 import com.artemchep.keyguard.common.usecase.AddGeneratorHistory
 import com.artemchep.keyguard.common.usecase.CopyText
 import com.artemchep.keyguard.common.usecase.DateFormatter
 import com.artemchep.keyguard.common.usecase.GetCanWrite
-import com.artemchep.keyguard.common.usecase.GetWordlists
 import com.artemchep.keyguard.common.usecase.GetEmailRelays
 import com.artemchep.keyguard.common.usecase.GetPassword
 import com.artemchep.keyguard.common.usecase.GetPasswordStrength
 import com.artemchep.keyguard.common.usecase.GetProfiles
 import com.artemchep.keyguard.common.usecase.GetWordlistPrimitive
+import com.artemchep.keyguard.common.usecase.GetWordlists
+import com.artemchep.keyguard.common.usecase.GpgKeyExport
+import com.artemchep.keyguard.common.usecase.GpgKeyPrivateExport
+import com.artemchep.keyguard.common.usecase.GpgKeyPublicExport
+import com.artemchep.keyguard.common.usecase.KeyPairExport
+import com.artemchep.keyguard.common.usecase.KeyPrivateExport
+import com.artemchep.keyguard.common.usecase.KeyPublicExport
 import com.artemchep.keyguard.common.usecase.NumberFormatter
 import com.artemchep.keyguard.common.util.flow.EventFlow
 import com.artemchep.keyguard.common.util.flow.combineToList
@@ -116,24 +119,26 @@ import com.artemchep.keyguard.feature.navigation.state.produceScreenState
 import com.artemchep.keyguard.feature.navigation.state.translate
 import com.artemchep.keyguard.generatorTarget
 import com.artemchep.keyguard.platform.util.isRelease
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.ContextItem
 import com.artemchep.keyguard.ui.FlatItemAction
 import com.artemchep.keyguard.ui.FlatItemLayout
 import com.artemchep.keyguard.ui.PLACEHOLDER_EMAIL
 import com.artemchep.keyguard.ui.buildContextItems
 import com.artemchep.keyguard.ui.icons.ChevronIcon
+import com.artemchep.keyguard.ui.icons.KeyguardGpgKey
 import com.artemchep.keyguard.ui.icons.KeyguardIcons
 import com.artemchep.keyguard.ui.icons.KeyguardWordlist
-import com.artemchep.keyguard.ui.icons.icon
-import com.artemchep.keyguard.ui.icons.iconSmall
 import com.artemchep.keyguard.ui.icons.custom.FormatLetterCaseLower
 import com.artemchep.keyguard.ui.icons.custom.FormatLetterCaseUpper
 import com.artemchep.keyguard.ui.icons.custom.Numeric
 import com.artemchep.keyguard.ui.icons.custom.Symbol
+import com.artemchep.keyguard.ui.icons.icon
+import com.artemchep.keyguard.ui.icons.iconSmall
 import com.artemchep.keyguard.ui.theme.isDark
 import io.ktor.http.URLBuilder
+import kotlin.time.Clock
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
@@ -162,12 +167,7 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Clock
-import com.artemchep.keyguard.platform.leAllInstances
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
-import org.kodein.di.instance
-import org.kodein.di.instanceOrNull
+import org.koin.compose.currentKoinScope
 
 private const val TIP_VISIBLE = true
 
@@ -230,31 +230,31 @@ fun produceGeneratorState(
     mode: AppMode,
     args: GeneratorRoute.Args,
     key: String? = null,
-) = with(localDI().direct) {
+) = with(currentKoinScope()) {
     produceGeneratorState(
         mode = mode,
         args = args,
         key = key,
-        addGeneratorHistory = instanceOrNull(),
-        getPassword = instance(),
-        getPasswordStrength = instance(),
-        getProfiles = instanceOrNull(),
-        getEmailRelays = instanceOrNull(),
-        getWordlists = instanceOrNull(),
-        getWordlistPrimitive = instanceOrNull(),
-        cryptoGenerator = instance(),
-        keyPairExport = instance(),
-        publicKeyExport = instance(),
-        privateKeyExport = instance(),
-        gpgKeyExport = instance(),
-        gpgPublicKeyExport = instance(),
-        gpgPrivateKeyExport = instance(),
-        numberFormatter = instance(),
-        dateFormatter = instance(),
-        getCanWrite = instance(),
-        tldService = instance(),
-        clipboardService = instance(),
-        emailRelays = leAllInstances(),
+        addGeneratorHistory = getOrNull(),
+        getPassword = get(),
+        getPasswordStrength = get(),
+        getProfiles = getOrNull(),
+        getEmailRelays = getOrNull(),
+        getWordlists = getOrNull(),
+        getWordlistPrimitive = getOrNull(),
+        cryptoGenerator = get(),
+        keyPairExport = get(),
+        publicKeyExport = get(),
+        privateKeyExport = get(),
+        gpgKeyExport = get(),
+        gpgPublicKeyExport = get(),
+        gpgPrivateKeyExport = get(),
+        numberFormatter = get(),
+        dateFormatter = get(),
+        getCanWrite = get(),
+        tldService = get(),
+        clipboardService = get(),
+        emailRelays = get<EmailRelayRegistry>().values,
     )
 }
 
@@ -789,6 +789,10 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
         key = "$PREFIX_GPG_KEY.type",
         storage = storage,
     ) { GpgKeyConfig.Type.default.key }
+    val gpgKeyVersionSink = mutablePersistedFlow(
+        key = "$PREFIX_GPG_KEY.version",
+        storage = storage,
+    ) { GpgKeyVersion.default.key }
     val gpgKeyRsaLengthSink = mutablePersistedFlow(
         key = "$PREFIX_GPG_KEY.rsa.length",
         storage = storage,
@@ -954,6 +958,36 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
         return GeneratorState.Filter.Item.Enum.Model(
             value = GpgKeyConfig.Type.getOrDefault(keyType).title,
             dropdown = dropdown,
+        )
+    }
+
+    suspend fun gpgKeyVersionFilterItem(
+        version: GpgKeyVersion,
+    ): GeneratorState.Filter.Item.Enum.Model {
+        suspend fun title(value: GpgKeyVersion) = translate(
+            when (value) {
+                GpgKeyVersion.V4 -> Res.string.gpg_key_version_v4
+                GpgKeyVersion.V6 -> Res.string.gpg_key_version_v6
+            },
+        )
+        return GeneratorState.Filter.Item.Enum.Model(
+            value = title(version),
+            dropdown = buildContextItems {
+                section {
+                    GpgKeyVersion.entries.forEach { value ->
+                        this += FlatItemAction(
+                            id = "generator.gpgKeyVersion.${value.key}",
+                            title = TextHolder.Value(title(value)),
+                            text = when (value) {
+                                GpgKeyVersion.V4 -> Res.string.gpg_key_version_v4_note
+                                GpgKeyVersion.V6 -> Res.string.gpg_key_version_v6_note
+                            }.wrap(),
+                            selected = value == version,
+                            onClick = { gpgKeyVersionSink.value = value.key },
+                        )
+                    }
+                }
+            },
         )
     }
 
@@ -1532,7 +1566,7 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
         onHide = ::hideTip,
     )
     val gpgKeyRsaFilterTip = GeneratorState.Filter.Tip(
-        text = translate(Res.string.generator_key_rsa_note),
+        text = translate(Res.string.generator_gpg_key_rsa_note),
         onHide = ::hideTip,
         onLearnMore = {
             val url = "https://en.wikipedia.org/wiki/RSA_(cryptosystem)"
@@ -1557,12 +1591,18 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
         val items = mutableListOf<GeneratorState.Filter.Item>(
             GeneratorState.Filter.Item.Enum(
                 key = "$PREFIX_GPG_KEY.type",
-                icon = Icons.Outlined.Key,
+                icon = Icons.Outlined.KeyguardGpgKey,
                 title = translate(Res.string.key_type),
                 model = gpgKeyTypeFilterItem(
                     keyType = config.config.type.key,
                     onSelect = gpgKeyTypeSink::value::set,
                 ),
+            ),
+            GeneratorState.Filter.Item.Enum(
+                key = "$PREFIX_GPG_KEY.version",
+                icon = Icons.Outlined.KeyguardGpgKey,
+                title = translate(Res.string.gpg_key_version_title),
+                model = gpgKeyVersionFilterItem(config.config.version),
             ),
             GeneratorState.Filter.Item.Enum(
                 key = "$PREFIX_GPG_KEY.expiry",
@@ -1689,7 +1729,7 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
         val name = gpgKey.userId
             .substringBefore('<')
             .trim()
-            .ifBlank { gpgKey.fingerprint.takeLast(16) }
+            .ifBlank { gpgKey.fingerprint.gpgKeyIdFromFingerprintOrNull() ?: gpgKey.fingerprint }
         val route = LeAddRoute(
             args = AddRoute.Args(
                 type = type,
@@ -1890,7 +1930,10 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
                     }
 
                 is GeneratorType2.GpgKey -> gpgKeyTypeSink
-                    .flatMapLatest { gpgKeyType ->
+                    .combine(gpgKeyVersionSink) { type, version ->
+                        type to GpgKeyVersion.getOrDefault(version)
+                    }
+                    .flatMapLatest { (gpgKeyType, version) ->
                         when (GpgKeyConfig.Type.getOrDefault(gpgKeyType)) {
                             GpgKeyConfig.Type.MODERN -> combine(
                                 gpgKeyNameHandle.sink,
@@ -1905,6 +1948,7 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
                                 PasswordGeneratorConfigBuilder2.GpgKey(
                                     config = GpgKeyConfig.Modern(
                                         userId = userId,
+                                        version = version,
                                         expiry = gpgKeyExpiry(
                                             rawOption = rawExpiryOption,
                                             rawCustomDate = rawCustomExpiryDate,
@@ -1928,6 +1972,7 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
                                 PasswordGeneratorConfigBuilder2.GpgKey(
                                     config = GpgKeyConfig.Rsa(
                                         userId = userId,
+                                        version = version,
                                         length = length,
                                         expiry = gpgKeyExpiry(
                                             rawOption = rawExpiryOption,
@@ -2192,6 +2237,7 @@ suspend fun RememberStateFlowScope.generatorStateProducer(
                             section {
                                 if (canWrite && hasAccounts && type.gpgKey) {
                                     this += FlatItemAction(
+                                        id = "generator.value.createItemWithGpgKey",
                                         leading = icon(Icons.Outlined.Add),
                                         title = Res.string.generator_create_item_with_gpg_key_title.wrap(),
                                         onClick = ::createGpgKeyWithKey.partially1(gpgKey),
@@ -2589,7 +2635,7 @@ private fun RememberStateFlowScope.flowOfGeneratorType(
             type is GeneratorType2.PinCode -> Icons.Outlined.Numbers
             type.password -> Icons.Outlined.Password
             type.sshKey -> Icons.Outlined.Terminal
-            type.gpgKey -> Icons.Outlined.Key
+            type.gpgKey -> Icons.Outlined.KeyguardGpgKey
             type is GeneratorType2.Username -> Icons.Outlined.AlternateEmail
             else -> Icons.Outlined.Mail
         }

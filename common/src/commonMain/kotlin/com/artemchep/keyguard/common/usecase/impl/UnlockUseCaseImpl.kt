@@ -4,10 +4,9 @@ import arrow.core.Either
 import arrow.core.compose
 import arrow.core.getOrElse
 import arrow.core.partially1
-import com.artemchep.keyguard.common.exception.isKeyException
+import com.artemchep.keyguard.common.exception.YubiKeyUnlockDecryptException
 import com.artemchep.keyguard.common.exception.crypto.BiometricKeyDecryptException
 import com.artemchep.keyguard.common.exception.crypto.BiometricKeyEncryptException
-import com.artemchep.keyguard.common.exception.YubiKeyUnlockDecryptException
 import com.artemchep.keyguard.common.io.IO
 import com.artemchep.keyguard.common.io.attempt
 import com.artemchep.keyguard.common.io.bind
@@ -22,9 +21,12 @@ import com.artemchep.keyguard.common.io.ioEffect
 import com.artemchep.keyguard.common.io.ioRaise
 import com.artemchep.keyguard.common.io.map
 import com.artemchep.keyguard.common.model.AuthResult
+import com.artemchep.keyguard.common.model.BiometricAuthException
+import com.artemchep.keyguard.common.model.BiometricBindingException
 import com.artemchep.keyguard.common.model.BiometricPurpose
 import com.artemchep.keyguard.common.model.BiometricStatus
 import com.artemchep.keyguard.common.model.DKey
+import com.artemchep.keyguard.util.fido2.FIDO2_INPUT_LENGTH
 import com.artemchep.keyguard.common.model.Fingerprint
 import com.artemchep.keyguard.common.model.FingerprintBiometric
 import com.artemchep.keyguard.common.model.MasterKdfVersion
@@ -33,12 +35,17 @@ import com.artemchep.keyguard.common.model.MasterPassword
 import com.artemchep.keyguard.common.model.MasterSession
 import com.artemchep.keyguard.common.model.VaultState
 import com.artemchep.keyguard.common.model.YUBIKEY_UNLOCK_HKDF_INFO
-import com.artemchep.keyguard.common.service.logging.LogLevel
-import com.artemchep.keyguard.common.service.logging.LogRepository
+import com.artemchep.keyguard.common.service.biometrics.BiometricKeyRepository
 import com.artemchep.keyguard.common.service.crypto.CipherEncryptor
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
+import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
+import com.artemchep.keyguard.common.service.logging.LogLevel
+import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.vault.FingerprintReadWriteRepository
 import com.artemchep.keyguard.common.service.vault.SessionMetadataReadWriteRepository
+import com.artemchep.keyguard.common.service.vault.VaultDatabaseSessionAccess
+import com.artemchep.keyguard.common.service.vault.VaultSession
+import com.artemchep.keyguard.common.service.vault.VaultSessionFactory
 import com.artemchep.keyguard.common.usecase.AuthConfirmMasterKeyUseCase
 import com.artemchep.keyguard.common.usecase.AuthGenerateMasterKeyUseCase
 import com.artemchep.keyguard.common.usecase.BiometricKeyDecryptUseCase
@@ -54,15 +61,16 @@ import com.artemchep.keyguard.common.usecase.YubiKeyUnlockAvailability
 import com.artemchep.keyguard.common.util.catch
 import com.artemchep.keyguard.common.util.flow.measureTimeTillFirstEvent
 import com.artemchep.keyguard.common.util.memoize
-import com.artemchep.keyguard.core.session.usecase.createSubDi
-import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
 import com.artemchep.keyguard.feature.crashlytics.crashlyticsTap
 import com.artemchep.keyguard.platform.LeBiometricCipher
 import com.artemchep.keyguard.provider.bitwarden.crypto.SymmetricCryptoKey2
+import kotlin.time.Clock
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.combineTransform
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -70,16 +78,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.take
-import kotlin.time.Clock
-import org.kodein.di.Copy
-import org.kodein.di.DI
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import org.kodein.di.subDI
 
 class UnlockUseCaseImpl(
-    private val di: DI,
+    private val sessionFactory: VaultSessionFactory,
+    private val vaultDatabaseSessionAccess: VaultDatabaseSessionAccess,
     private val biometricStatusUseCase: BiometricStatusUseCase,
+    private val biometricKeyRepository: BiometricKeyRepository,
     private val getVaultSession: GetVaultSession,
     private val putVaultSession: PutVaultSession,
     private val disableBiometric: DisableBiometric,
@@ -95,6 +99,10 @@ class UnlockUseCaseImpl(
     private val cryptoGenerator: CryptoGenerator,
     private val cipherEncryptor: CipherEncryptor,
     private val yubiKeyUnlockAvailability: YubiKeyUnlockAvailability,
+    private val fido2UnlockAvailability: com.artemchep.keyguard.common.usecase.Fido2UnlockAvailability,
+    private val fido2UnlockService: Fido2UnlockService,
+    private val base64Service: com.artemchep.keyguard.common.service.text.Base64Service,
+    private val scope: CoroutineScope = GlobalScope,
 ) : UnlockUseCase {
     companion object {
         private const val TAG = "UnlockFlow"
@@ -118,7 +126,9 @@ class UnlockUseCaseImpl(
         generateMasterKey(password, version)
     }
 
-    private val sharedFlow = combine(
+    private val creatingFrom = MutableStateFlow<MasterSession.Empty?>(null)
+
+    private val sharedFlow = combineTransform(
         keyReadWriteRepository.get()
             .measureTimeTillFirstEvent { d, _ ->
                 val msg = "Fetching the vault info took $d"
@@ -130,11 +140,23 @@ class UnlockUseCaseImpl(
                 logRepository.post(TAG, msg, level = LogLevel.INFO)
             },
         getVaultSession(),
-    ) { persistableUserTokens, biometric, session ->
-        when {
+        creatingFrom,
+    ) { persistableUserTokens, biometric, session, _ ->
+        // Read the guard directly: the fingerprint update can reach combine before
+        // its creation-start update. Preserve the existing setup screen until both
+        // writes are observed, or a subsequent lock replaces the starting session.
+        val startingSession = creatingFrom.value
+        if (startingSession != null) {
+            if (session === startingSession ||
+                session is MasterSession.Key && persistableUserTokens == null
+            ) return@combineTransform
+            creatingFrom.compareAndSet(startingSession, null)
+        }
+        val state = when {
             persistableUserTokens == null && session is MasterSession.Empty ->
                 createCreateVaultState(
                     biometric = biometric.forCreate,
+                    session = session,
                 )
 
             persistableUserTokens == null && session is MasterSession.Key -> {
@@ -151,16 +173,28 @@ class UnlockUseCaseImpl(
                     lockInfo = session.lockInfo,
                 )
 
-            persistableUserTokens != null && session is MasterSession.Key ->
+            persistableUserTokens != null && session is MasterSession.Key -> {
+                // The vault is open, so the master key is at hand: restore the
+                // platform key behind the saved biometric binding if it is gone.
+                // Doing it here, rather than inside the unlock action, covers a
+                // restored persisted session and avoids re-emitting the Unlock
+                // state while the unlock action is still running.
+                rearmBiometricIfNeeded(
+                    persistableUserTokens,
+                    biometric.forCreate,
+                    session.masterKey,
+                ).bind()
                 createMainVaultState(
                     tokens = persistableUserTokens,
                     biometric = biometric.forCreate,
                     masterKey = session.masterKey,
-                    di = session.di,
+                    session = session.session,
                 )
+            }
 
             else -> error("Unreachable statement")
         }
+        emit(state)
     }
         .distinctUntilChanged()
         .measureTimeTillFirstEvent(
@@ -169,27 +203,8 @@ class UnlockUseCaseImpl(
             val msg = "Initializing the app took $d"
             logRepository.post(TAG, msg, level = LogLevel.INFO)
         }
-        .shareIn(GlobalScope, SharingStarted.WhileSubscribed(10000L), replay = 1)
+        .shareIn(scope, SharingStarted.WhileSubscribed(10000L), replay = 1)
 
-    constructor(directDI: DirectDI) : this(
-        di = directDI.di,
-        biometricStatusUseCase = directDI.instance(),
-        getVaultSession = directDI.instance(),
-        putVaultSession = directDI.instance(),
-        disableBiometric = directDI.instance(),
-        logRepository = directDI.instance(),
-        keyReadWriteRepository = directDI.instance(),
-        sessionMetadataReadWriteRepository = directDI.instance(),
-        getBiometricRequireConfirmation = directDI.instance(),
-        getBiometricRemainingDuration = directDI.instance(),
-        biometricKeyEncryptUseCase = directDI.instance(),
-        decryptBiometricKeyUseCase = directDI.instance(),
-        authConfirmMasterKeyUseCase = directDI.instance(),
-        authGenerateMasterKeyUseCase = directDI.instance(),
-        cryptoGenerator = directDI.instance(),
-        cipherEncryptor = directDI.instance(),
-        yubiKeyUnlockAvailability = directDI.instance(),
-    )
 
     override fun invoke() = sharedFlow
 
@@ -222,7 +237,21 @@ class UnlockUseCaseImpl(
 
     private suspend fun createCreateVaultState(
         biometric: BiometricStatus,
+        session: MasterSession.Empty,
     ): VaultState {
+        // A failed or cancelled creation must release the guard so the persisted
+        // fingerprint determines whether the user can retry setup or unlock.
+        @Suppress("TooGenericExceptionCaught")
+        fun IO<Unit>.withCreationGuard(): IO<Unit> = ioEffect {
+            check(creatingFrom.compareAndSet(null, session)) { "Vault creation is already in progress" }
+            try {
+                bind()
+            } catch (e: Throwable) {
+                creatingFrom.compareAndSet(session, null)
+                throw e
+            }
+        }
+
         return VaultState.Create(
             createWithMasterPassword = VaultState.Create.WithPassword(
                 getCreateIo = { password ->
@@ -236,6 +265,7 @@ class UnlockUseCaseImpl(
                         .flatTap {
                             writeLastPasswordUseTimestamp()
                         }
+                        .withCreationGuard()
                         .dispatchOn(Dispatchers.Default)
                 },
             ),
@@ -288,6 +318,7 @@ class UnlockUseCaseImpl(
                             .flatTap {
                                 writeLastPasswordUseTimestamp()
                             }
+                            .withCreationGuard()
                             .dispatchOn(Dispatchers.Default)
                     },
                     requireConfirmation = requireConfirmation,
@@ -325,10 +356,11 @@ class UnlockUseCaseImpl(
                         .dispatchOn(Dispatchers.Default)
                 },
             ),
-            unlockWithBiometric = if (biometric is BiometricStatus.Available && tokens.biometric != null) {
+            unlockWithBiometric = if (biometric is BiometricStatus.Available && hasBiometricKey(tokens)) {
+                val biometricTokens = requireNotNull(tokens.biometric)
                 val getCipherForDecryption = biometric
                     .createCipher
-                    .partially1(BiometricPurpose.Decrypt(DKey(tokens.biometric.iv)))
+                    .partially1(BiometricPurpose.Decrypt(DKey(biometricTokens.iv)))
                     // Handle key invalidation
                     .createCipherOrDisableBiometrics()
                     .let { block ->
@@ -344,7 +376,7 @@ class UnlockUseCaseImpl(
                 VaultState.Unlock.WithBiometric(
                     getCipher = getCipherForDecryption,
                     getCreateIo = {
-                        val encryptedMasterKey = tokens.biometric.encryptedMasterKey
+                        val encryptedMasterKey = biometricTokens.encryptedMasterKey
                         val cipherIo = ioEffect {
                             getCipherForDecryption()
                                 .getOrElse { e ->
@@ -366,6 +398,21 @@ class UnlockUseCaseImpl(
                             // master key.
                             .flatMap(::unlock)
                             .dispatchOn(Dispatchers.Default)
+                    },
+                    getFailureIo = { exception ->
+                        ioRaise<Unit>(exception)
+                            .handleErrorTap(
+                                predicate = {
+                                    exception.code == BiometricAuthException.ERROR_KEY_INVALIDATED
+                                },
+                            ) {
+                                // The saved binding can never succeed again, so remove
+                                // the biometric unlock without failing the caller.
+                                disableBiometric()
+                                    .crashlyticsTap()
+                                    .attempt()
+                                    .bind()
+                            }
                     },
                     requireConfirmation = requireConfirmation,
                 )
@@ -389,6 +436,22 @@ class UnlockUseCaseImpl(
                 }
             } else {
                 null
+            },
+            unlockWithFido2 = tokens.fido2?.takeIf { fido2UnlockAvailability.isSupported() }?.let { protector ->
+                VaultState.Unlock.WithFido2(
+                    getRequest = {
+                        com.artemchep.keyguard.util.fido2.Fido2Operation.Derive(
+                            base64Service.decode(protector.credentialId),
+                            base64Service.decode(protector.salt),
+                            cryptoGenerator.seed(FIDO2_INPUT_LENGTH),
+                        )
+                    },
+                    getCreateIo = { secret ->
+                        ioEffect { fido2UnlockService.decrypt(tokens, secret) }
+                            .flatMap(::unlock)
+                            .dispatchOn(Dispatchers.Default)
+                    },
+                )
             },
             lockInfo = lockInfo?.run {
                 VaultState.Unlock.LockInfo(
@@ -427,9 +490,9 @@ class UnlockUseCaseImpl(
         tokens: Fingerprint,
         biometric: BiometricStatus,
         masterKey: MasterKey,
-        di: DI,
+        session: VaultSession,
     ): VaultState {
-        val databaseManager by di.instance<VaultDatabaseManager>()
+        val databaseManager = vaultDatabaseSessionAccess.get(session) ?: return VaultState.Loading
         val unlockMasterKey = authConfirmMasterKeyUseCase(
             tokens.master.salt,
             tokens.master.hash,
@@ -540,9 +603,57 @@ class UnlockUseCaseImpl(
         return VaultState.Main(
             masterKey = masterKey,
             changePassword = changePassword,
-            di = di,
+            session = session,
         )
     }
+
+    /**
+     * `true` if there is a saved biometric binding and the platform
+     * still holds the key that protects it.
+     */
+    private val hasBiometricKey: suspend (Fingerprint) -> Boolean = { tokens ->
+        if (tokens.biometric == null) {
+            false
+        } else {
+            // If the check itself fails, keep the option and let the
+            // unlock attempt report the actual problem.
+            biometricKeyRepository.exists()
+                .attempt()
+                .bind()
+                .getOrElse { true }
+        }
+    }
+
+    /**
+     * Re-creates the platform key behind the saved biometric binding
+     * when the platform has lost it: Linux keeps the key in memory only
+     * and drops it when the app exits. Runs whenever the vault is open,
+     * so the master key is already available and no prompt is needed.
+     * Never fails.
+     */
+    private fun rearmBiometricIfNeeded(
+        tokens: Fingerprint,
+        biometric: BiometricStatus,
+        masterKey: MasterKey,
+    ): IO<Unit> = ioEffect {
+        if (tokens.biometric == null || biometric !is BiometricStatus.Available) {
+            return@ioEffect
+        }
+        val rearmed = rearmBiometricBinding(
+            tokens = tokens,
+            masterKey = masterKey,
+            biometric = biometric,
+            biometricKeyRepository = biometricKeyRepository,
+            keyReadWriteRepository = keyReadWriteRepository,
+            biometricKeyEncryptUseCase = biometricKeyEncryptUseCase,
+        )
+        if (rearmed) {
+            logRepository.post(TAG, "Re-created the biometric unlock key.", level = LogLevel.INFO)
+        }
+    }
+        .crashlyticsTap()
+        .attempt()
+        .map { }
 
     private fun (suspend () -> LeBiometricCipher).createCipherOrDisableBiometrics() = this
         .let { createCipher ->
@@ -550,10 +661,9 @@ class UnlockUseCaseImpl(
             suspend {
                 try {
                     createCipher()
-                } catch (e: Throwable) {
-                    if (!e.isKeyException()) throw e
-                    // If the key is not valid, then we want to disable the
-                    // biometrics for now.
+                } catch (e: BiometricBindingException) {
+                    // The binding is already unusable, so remove the biometric
+                    // unlock without failing the caller.
                     disableBiometric()
                         .crashlyticsTap()
                         .attempt()
@@ -587,22 +697,16 @@ class UnlockUseCaseImpl(
     private fun unlock(
         masterKey: MasterKey,
     ): IO<Unit> = ioEffect {
-        val moduleDi = DI.Module("lalala") {
-            createSubDi(
+        val session = sessionFactory.createAuthenticated(masterKey)
+        putVaultSession(
+            MasterSession.Key(
                 masterKey = masterKey,
-            )
-        }
-        val subDi =
-            subDI(di, false, Copy.None) {
-                import(moduleDi, allowOverride = true)
-            }
-        MasterSession.Key(
-            masterKey = masterKey,
-            di = subDi,
-            origin = MasterSession.Key.Authenticated,
-            createdAt = Clock.System.now(),
-        )
-    }.flatMap(putVaultSession)
+                session = session,
+                origin = MasterSession.Key.Authenticated,
+                createdAt = Clock.System.now(),
+            ),
+        ).bind()
+    }
 
     private fun writeLastPasswordUseTimestamp(): IO<Unit> = sessionMetadataReadWriteRepository
         .setLastPasswordUseTimestamp(instant = Clock.System.now())

@@ -8,8 +8,8 @@ data class AddCredentialCipherRequestPasskeyData(
     val keyAlgorithm: String, // ECDSA
     val keyCurve: String, // P-256
     val keyValue: String,
-    /** Base64 编码的 32 字节随机 PRF 密钥。 */
-    val prfSecret: String,
+    /** Base64 编码的 32 字节随机 PRF 密钥；不支持 PRF 的平台可省略。 */
+    val prfSecret: String? = null,
     val rpId: String,
     val rpName: String?,
     val counter: Int?,

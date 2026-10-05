@@ -17,22 +17,23 @@ import com.artemchep.keyguard.common.service.gpgagent.toGpgAgentSecretOrNull
 import com.artemchep.keyguard.common.service.gpgagent.toGpgPublicKeyEntry
 import com.artemchep.keyguard.common.service.logging.LogLevel
 import com.artemchep.keyguard.common.service.logging.LogRepository
+import com.artemchep.keyguard.common.service.vault.testDomainSessionAccess
+import com.artemchep.keyguard.common.service.vault.testVaultSession
 import com.artemchep.keyguard.common.usecase.GetCiphers
 import com.artemchep.keyguard.common.usecase.GetGpgAgentApprovalWindowNoOp
 import com.artemchep.keyguard.common.usecase.GetGpgAgentFilter
 import com.artemchep.keyguard.common.usecase.GetVaultSession
 import com.artemchep.keyguard.core.store.bitwarden.BitwardenService
 import com.artemchep.keyguard.crypto.NativeGpgAgentCrypto
+import com.artemchep.keyguard.test.gpgMetadata
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
-import org.kodein.di.DI
-import org.kodein.di.bindSingleton
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.time.Instant
 
 class GpgAgentListKeysContractTest {
     @Test
@@ -68,8 +69,8 @@ class GpgAgentListKeysContractTest {
                     version = MasterKdfVersion.V1,
                     byteArray = ByteArray(size = MASTER_KEY_BYTES),
                 ),
-                di = DI {
-                    bindSingleton<GetCiphers> {
+                session = testVaultSession {
+                    scoped<GetCiphers> {
                         object : GetCiphers {
                             override fun invoke(): Flow<List<DSecret>> = flowOf(ciphers)
                         }
@@ -141,6 +142,7 @@ class GpgAgentListKeysContractTest {
         session: MasterSession?,
         repository: GpgPublicKeyRepository,
     ) = GpgAgentRequestProcessorImpl(
+        sessionAccess = testDomainSessionAccess(),
         logRepository = NoOpLogRepository,
         crypto = NativeGpgAgentCrypto,
         getVaultSession = FakeGetVaultSession(session),
@@ -213,14 +215,12 @@ class GpgAgentListKeysContractTest {
             privateKeyArmored = "private-key",
             publicKeyArmored = "public-key",
             fingerprint = fingerprint,
-            metadata = GpgAgentKeyMetadata(
-                keys = listOf(
-                    GpgAgentKeyMetadataKey(
+            metadata = gpgMetadata(
+                GpgAgentKeyMetadataKey(
                         keygrip = keygrip,
                         fingerprint = fingerprint,
                         algorithm = "ED25519",
                         capabilities = setOf("sign", "decrypt"),
-                    ),
                 ),
             ),
         ),

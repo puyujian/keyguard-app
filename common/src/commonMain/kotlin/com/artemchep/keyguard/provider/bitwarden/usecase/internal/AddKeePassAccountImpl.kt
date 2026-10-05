@@ -8,13 +8,15 @@ import com.artemchep.keyguard.common.io.launchIn
 import com.artemchep.keyguard.common.io.map
 import com.artemchep.keyguard.common.io.measure
 import com.artemchep.keyguard.common.model.AccountId
-import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
+import com.artemchep.keyguard.common.service.database.vault.VaultDatabaseManager
 import com.artemchep.keyguard.common.service.file.FileService
 import com.artemchep.keyguard.common.service.keepass.prepareKeePassDatabase
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.text.Base64Service
 import com.artemchep.keyguard.common.service.webdav.KtorWebDavClientFactory
+import com.artemchep.keyguard.common.service.s3.S3ClientFactory
+import com.artemchep.keyguard.common.service.s3.toFileLocation
 import com.artemchep.keyguard.common.service.webdav.WebDavClientFactory
 import com.artemchep.keyguard.common.usecase.GetAccounts
 import com.artemchep.keyguard.common.usecase.GetPurchased
@@ -25,8 +27,6 @@ import com.artemchep.keyguard.common.usecase.premium
 import com.artemchep.keyguard.core.store.bitwarden.FileLocation
 import com.artemchep.keyguard.core.store.bitwarden.KeePassToken
 import kotlinx.coroutines.Dispatchers
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 
 class AddKeePassAccountImpl(
     private val getPurchased: GetPurchased,
@@ -39,27 +39,12 @@ class AddKeePassAccountImpl(
     private val fileService: FileService,
     private val base64Service: Base64Service,
     private val webDavClientFactory: WebDavClientFactory,
+    private val s3ClientFactory: S3ClientFactory,
     private val db: VaultDatabaseManager,
 ) : AddKeePassAccount {
     companion object {
         private const val TAG = "AddAccount.keepass"
     }
-
-    constructor(directDI: DirectDI) : this(
-        getPurchased = directDI.instance(),
-        getAccounts = directDI.instance(),
-        queueSyncById = directDI.instance(),
-        syncById = directDI.instance(),
-        windowCoroutineScope = directDI.instance(),
-        logRepository = directDI.instance(),
-        cryptoGenerator = directDI.instance(),
-        fileService = directDI.instance(),
-        base64Service = directDI.instance(),
-        webDavClientFactory = KtorWebDavClientFactory(
-            httpClient = directDI.instance(),
-        ),
-        db = directDI.instance(),
-    )
 
     override fun invoke(
         params: AddKeePassAccountParams,
@@ -68,6 +53,7 @@ class AddKeePassAccountImpl(
             fileService = fileService,
             params = params,
             webDavClientFactory = webDavClientFactory,
+            s3ClientFactory = s3ClientFactory,
         )
         val token = KeePassToken(
             id = cryptoGenerator.uuid(),
@@ -89,7 +75,9 @@ class AddKeePassAccountImpl(
                             ?.takeIf { it.value.isNotEmpty() },
                         displayName = params.dbFileName,
                     )
-                } ?: FileLocation.Local(
+                } ?: params.s3?.toFileLocation(
+                    displayName = params.dbFileName,
+                ) ?: FileLocation.Local(
                     uri = params.dbUri,
                     accessToken = params.dbAccessToken,
                     managedByApp = params.managedByApp,

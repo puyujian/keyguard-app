@@ -9,12 +9,90 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DesktopLibInteropTest {
+    @Test
+    fun `autotype forwards UTF-8 and clears the native payload on disposal`() {
+        for (payload in listOf("", "Hello, Keyguard!", "Привіт Ä 中文 😀 e\u0301\t\n")) {
+            val bytes = payload.encodeToByteArray() + byteArrayOf(0)
+            val lib = FakeDesktopLibJna()
+            val scope = DisposableScope()
+
+            try {
+                scope.autoTypeOrThrow(lib, payload)
+                assertEquals(payload, lib.autoTypeText)
+                assertContentEquals(bytes, lib.autoTypePayload!!.getByteArray(0L, bytes.size))
+            } finally {
+                scope.dispose()
+            }
+
+            assertContentEquals(ByteArray(bytes.size), lib.autoTypePayload!!.getByteArray(0L, bytes.size))
+        }
+    }
+
+    @Test
+    fun `autotype native failure is redacted and payload is cleared`() {
+        val payload = "synthetic-secret-Ä"
+        val lib = FakeDesktopLibJna().apply {
+            autoTypeResult = false
+        }
+        val scope = DisposableScope()
+
+        try {
+            val error = assertFailsWith<IllegalStateException> {
+                scope.autoTypeOrThrow(lib, payload)
+            }
+            assertEquals("Failed to auto type payload.", error.message)
+        } finally {
+            scope.dispose()
+        }
+
+        val size = payload.encodeToByteArray().size + 1
+        assertContentEquals(ByteArray(size), lib.autoTypePayload!!.getByteArray(0L, size))
+    }
+
+    @Test
+    fun `autotype payload is cleared when the native call throws`() {
+        val lib = FakeDesktopLibJna().apply {
+            autoTypeFailure = IllegalStateException("native failure")
+        }
+        val scope = DisposableScope()
+
+        try {
+            assertFailsWith<IllegalStateException> {
+                scope.autoTypeOrThrow(lib, "secret")
+            }
+        } finally {
+            scope.dispose()
+        }
+
+        assertContentEquals(ByteArray(7), lib.autoTypePayload!!.getByteArray(0L, 7))
+    }
+
+    @Test
+    fun `autotype rejects embedded NUL before calling native code`() {
+        val lib = FakeDesktopLibJna()
+        val scope = DisposableScope()
+
+        try {
+            val error = assertFailsWith<IllegalArgumentException> {
+                scope.autoTypeOrThrow(lib, "secret\u0000tail")
+            }
+            assertEquals("AutoType payload contains an unsupported character.", error.message)
+        } finally {
+            scope.dispose()
+        }
+
+        assertNull(lib.autoTypePayload)
+    }
+
     @Test
     fun `system accent color returns native color`() {
         val expected = 0xFF33_6699.toInt()
@@ -98,15 +176,70 @@ class DesktopLibInteropTest {
         val result = async {
             biometricsVerifyOrThrow(
                 lib = lib,
+                windowHandle = 42L,
                 title = "Verify",
             )
         }
         runCurrent()
         assertTrue(!result.isCompleted)
 
-        lib.biometricsCallback!!.invoke(true, null)
+        lib.biometricsCallback!!.invoke(BiometricsStatus.SUCCESS.code, null)
 
         result.await()
+        assertEquals(42L, lib.biometricsWindowHandle)
+        assertEquals("Verify", lib.biometricsTitle)
+    }
+
+    @Test
+    fun `biometrics verify preserves native failure status`() = runTest {
+        val lib = FakeDesktopLibJna()
+
+        val result = async {
+            runCatching {
+                biometricsVerifyOrThrow(
+                    lib = lib,
+                    windowHandle = 0L,
+                    title = "Verify",
+                )
+            }
+        }
+        runCurrent()
+
+        Memory(9).use { error ->
+            error.setString(0L, "canceled")
+            lib.biometricsCallback!!.invoke(BiometricsStatus.USER_CANCELED.code, error)
+        }
+
+        val exception = result.await().exceptionOrNull()
+        assertIs<BiometricsException>(exception)
+        assertEquals(BiometricsStatus.USER_CANCELED, exception.status)
+        assertEquals("canceled", exception.message)
+    }
+
+    @Test
+    fun `biometrics verify preserves native lockout status`() = runTest {
+        val lib = FakeDesktopLibJna()
+
+        val result = async {
+            runCatching {
+                biometricsVerifyOrThrow(
+                    lib = lib,
+                    windowHandle = 0L,
+                    title = "Verify",
+                )
+            }
+        }
+        runCurrent()
+
+        Memory(7).use { error ->
+            error.setString(0L, "locked")
+            lib.biometricsCallback!!.invoke(BiometricsStatus.SECURITY_DEVICE_LOCKED.code, error)
+        }
+
+        val exception = result.await().exceptionOrNull()
+        assertIs<BiometricsException>(exception)
+        assertEquals(BiometricsStatus.SECURITY_DEVICE_LOCKED, exception.status)
+        assertEquals("locked", exception.message)
     }
 
     @Test
@@ -116,15 +249,16 @@ class DesktopLibInteropTest {
         val result = async {
             biometricsVerifyOrThrow(
                 lib = lib,
+                windowHandle = 0L,
                 title = "Verify",
             )
         }
         runCurrent()
 
         val callback = lib.biometricsCallback!!
-        callback.invoke(true, null)
+        callback.invoke(BiometricsStatus.SUCCESS.code, null)
         callback.invoke(
-            false,
+            BiometricsStatus.UNKNOWN.code,
             Memory(5).apply {
                 setString(0L, "boom")
             },
@@ -141,6 +275,7 @@ class DesktopLibInteropTest {
         val result = async {
             biometricsVerifyOrThrow(
                 lib = lib,
+                windowHandle = 0L,
                 title = "Verify",
                 callbackRetention = callbackRetention,
             )
@@ -154,7 +289,7 @@ class DesktopLibInteropTest {
         assertTrue(result.isCancelled)
         assertEquals(1, callbackRetention.size)
 
-        callback.invoke(true, null)
+        callback.invoke(BiometricsStatus.SUCCESS.code, null)
 
         assertTrue(result.isCancelled)
         assertEquals(0, callbackRetention.size)
@@ -171,6 +306,7 @@ class DesktopLibInteropTest {
         val actual = assertFailsWith<IllegalStateException> {
             biometricsVerifyOrThrow(
                 lib = lib,
+                windowHandle = 0L,
                 title = "Verify",
                 callbackRetention = callbackRetention,
             )
@@ -180,26 +316,134 @@ class DesktopLibInteropTest {
         assertEquals(0, callbackRetention.size)
     }
 
+    @Test
+    fun `secret transform copies result before native call returns`() {
+        val expected = byteArrayOf(1, 2, 3, 4)
+        val lib = FakeDesktopLibJna().apply {
+            biometricsResult = expected
+        }
+        val scope = DisposableScope()
+
+        val actual = try {
+            scope.biometricsTransformSecretOrThrow(
+                lib = lib,
+                windowHandle = 42L,
+                title = "Unlock Keyguard",
+                input = byteArrayOf(5, 6),
+                decrypt = true,
+            )
+        } finally {
+            scope.dispose()
+        }
+
+        assertTrue(expected.contentEquals(actual))
+        assertEquals(42L, lib.biometricsWindowHandle)
+        assertEquals("Unlock Keyguard", lib.biometricsTitle)
+        assertEquals(1, lib.biometricsDecrypt)
+    }
+
+    @Test
+    fun `secret transform preserves native failure status`() {
+        val lib = FakeDesktopLibJna().apply {
+            biometricsStatus = BiometricsStatus.USER_CANCELED
+        }
+        val scope = DisposableScope()
+
+        val error = try {
+            assertFailsWith<BiometricsException> {
+                scope.biometricsTransformSecretOrThrow(
+                    lib = lib,
+                    windowHandle = 0L,
+                    title = "Verify",
+                    input = byteArrayOf(1),
+                    decrypt = false,
+                )
+            }
+        } finally {
+            scope.dispose()
+        }
+
+        assertEquals(BiometricsStatus.USER_CANCELED, error.status)
+        assertEquals(0, lib.biometricsDecrypt)
+    }
+
     private class FakeDesktopLibJna : DesktopLibJna {
+        var autoTypeResult: Boolean = true
+        var autoTypeFailure: Throwable? = null
+        var autoTypePayload: Pointer? = null
+        var autoTypeText: String? = null
         var keychainAddPasswordResult: Boolean = true
         var keychainGetPasswordResult: Pointer? = null
         var biometricsCallback: DesktopLibJna.BiometricsVerifyCallback? = null
         var biometricsVerifyFailure: Throwable? = null
+        var biometricsStatus: BiometricsStatus = BiometricsStatus.SUCCESS
+        var biometricsResult: ByteArray = byteArrayOf(1)
+        var biometricsWindowHandle: Long = 0L
+        var biometricsTitle: String = ""
+        var biometricsDecrypt: Int = 0
         var nativeSystemAccentColor: Int = 0
         val freedPointers = mutableListOf<Pointer>()
 
-        override fun autoType(payload: Pointer): Boolean = true
+        override fun registerNativePowerEvents(callback: DesktopLibJna.PowerEventCallback): Int = -1
+
+        override fun unregisterNativePowerEvents(id: Int): Boolean = false
+
+        override fun autoType(payload: Pointer): Boolean {
+            autoTypePayload = payload
+            autoTypeText = payload.getString(0L, "UTF-8")
+            autoTypeFailure?.let { throw it }
+            return autoTypeResult
+        }
 
         override fun getSystemAccentColor(): Int = nativeSystemAccentColor
 
         override fun biometricsIsSupported(): Boolean = true
 
         override fun biometricsVerify(
+            windowHandle: Long,
             title: Pointer,
+            callback: DesktopLibJna.BiometricsVerifyCallback,
+        ) {
+            biometricsWindowHandle = windowHandle
+            biometricsTitle = title.getString(0L)
+            biometricsCallback = callback
+            biometricsVerifyFailure?.let { throw it }
+        }
+
+        override fun biometricsPrepareEnrollment(
             callback: DesktopLibJna.BiometricsVerifyCallback,
         ) {
             biometricsCallback = callback
             biometricsVerifyFailure?.let { throw it }
+        }
+
+        override fun biometricsDeleteCredential(): Int = 1
+
+        override fun biometricsTransformSecret(
+            windowHandle: Long,
+            title: Pointer,
+            input: Pointer,
+            inputLength: Long,
+            decrypt: Int,
+            callback: DesktopLibJna.BiometricsResultCallback,
+        ): Int {
+            biometricsWindowHandle = windowHandle
+            biometricsTitle = title.getString(0L)
+            biometricsDecrypt = decrypt
+            if (biometricsStatus == BiometricsStatus.SUCCESS) {
+                Memory(biometricsResult.size.toLong()).use { result ->
+                    result.write(0L, biometricsResult, 0, biometricsResult.size)
+                    callback.invoke(
+                        biometricsStatus.code,
+                        result,
+                        biometricsResult.size.toLong(),
+                        null,
+                    )
+                }
+            } else {
+                callback.invoke(biometricsStatus.code, null, 0L, null)
+            }
+            return 1
         }
 
         override fun keychainAddPassword(id: Pointer, password: Pointer): Boolean =

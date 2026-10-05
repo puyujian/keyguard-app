@@ -4,6 +4,7 @@ import com.artemchep.keyguard.common.io.bind
 import com.artemchep.keyguard.common.io.throwIfFatalOrCancellation
 import com.artemchep.keyguard.common.model.RefreshGpgPublicKeysRequest
 import com.artemchep.keyguard.common.service.gpgkeyserver.GpgKeyserverRefreshWorker
+import com.artemchep.keyguard.common.service.gpgkeyserver.gpgKeyserverRefreshFingerprintOrNull
 import com.artemchep.keyguard.common.service.logging.LogLevel
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.usecase.GetCiphers
@@ -11,7 +12,10 @@ import com.artemchep.keyguard.common.usecase.GetGpgKeyserverAutoRefresh
 import com.artemchep.keyguard.common.usecase.GetGpgKeyserverLastRefresh
 import com.artemchep.keyguard.common.usecase.GetGpgKeyserverRefreshInterval
 import com.artemchep.keyguard.common.usecase.RefreshGpgPublicKeys
-import com.artemchep.keyguard.common.service.gpgkeyserver.gpgKeyserverRefreshFingerprintOrNull
+import kotlin.coroutines.coroutineContext
+import kotlin.time.Clock
+import kotlin.time.Duration
+import kotlin.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,12 +25,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import kotlin.coroutines.coroutineContext
-import kotlin.time.Clock
-import kotlin.time.Duration
-import kotlin.time.Instant
 
 class GpgKeyserverRefreshWorkerImpl(
     private val getGpgKeyserverAutoRefresh: GetGpgKeyserverAutoRefresh,
@@ -40,17 +38,6 @@ class GpgKeyserverRefreshWorkerImpl(
     companion object {
         private const val TAG = "GpgKeyserverRefreshWorker"
     }
-
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        getGpgKeyserverAutoRefresh = directDI.instance(),
-        getGpgKeyserverRefreshInterval = directDI.instance(),
-        getGpgKeyserverLastRefresh = directDI.instance(),
-        getCiphers = directDI.instance(),
-        refreshGpgPublicKeys = directDI.instance(),
-        logRepository = directDI.instance(),
-    )
 
     override fun launch(scope: CoroutineScope): Job = scope.launch {
         combine(
@@ -98,11 +85,18 @@ class GpgKeyserverRefreshWorkerImpl(
 
             // The refresh use-case writes the last-refresh timestamp itself
             // upon completion.
-            refreshGpgPublicKeys(
+            val result = refreshGpgPublicKeys(
                 RefreshGpgPublicKeysRequest(
                     cipherIds = cipherIds,
                 ),
             ).bind()
+            if (result.failed > 0) {
+                logRepository.post(
+                    tag = TAG,
+                    message = "Failed to refresh ${result.failed} GPG public keys.",
+                    level = LogLevel.WARNING,
+                )
+            }
         } catch (e: Exception) {
             e.throwIfFatalOrCancellation()
             logRepository.post(

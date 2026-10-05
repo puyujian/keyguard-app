@@ -4,16 +4,24 @@ import arrow.core.Either
 import com.artemchep.keyguard.common.exception.HttpException
 import com.artemchep.keyguard.common.service.crypto.FileEncryptionCodec
 import com.artemchep.keyguard.crypto.CryptoGeneratorJvm
+import com.artemchep.keyguard.crypto.FileEncryptionFormat
 import com.artemchep.keyguard.crypto.FileEncryptionCodecJvm
 import com.artemchep.keyguard.util.io.atomic.AtomicFileDestination
 import com.artemchep.keyguard.util.io.atomic.AtomicPathComponent
 import com.artemchep.keyguard.util.io.atomic.AtomicRelativePath
 import com.artemchep.keyguard.util.io.toLocalPath
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.cache.HttpCache
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterIsInstance
@@ -40,12 +48,14 @@ import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.readBytes
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import okio.Buffer as OkioBuffer
@@ -57,6 +67,49 @@ private const val CALL_CANCELLATION_TIMEOUT_SECONDS = 5L
 
 @Suppress("FunctionNaming")
 class DownloadTaskJvmSuccessfulOutputTest {
+    @Test
+    fun `url loader bypasses installed response cache`() = runTest {
+        val data = "payload".encodeToByteArray()
+        var requestCount = 0
+        val httpClient = HttpClient(
+            MockEngine { request ->
+                requestCount += 1
+                assertEquals("no-store", request.headers[HttpHeaders.CacheControl])
+                respond(
+                    content = ByteReadChannel(data),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(
+                        HttpHeaders.CacheControl,
+                        "public, max-age=3600",
+                    ),
+                )
+            },
+        ) {
+            install(HttpCache)
+        }
+        val task = DownloadTaskImpl(
+            httpClient = httpClient,
+            fileEncryptionCodec = CopyingFileEncryptionCodec(),
+        )
+
+        repeat(2) {
+            val sink = Buffer()
+            val complete = task
+                .fileLoader(
+                    url = "https://example.com/payload.bin",
+                    key = null,
+                    writer = DownloadWriter.SinkWriter(sink),
+                )
+                .filterIsInstance<DownloadProgress.Complete>()
+                .single()
+
+            assertIs<Either.Right<String?>>(complete.result)
+            assertContentEquals(data, sink.readByteArray())
+        }
+
+        assertEquals(2, requestCount)
+    }
+
     @Test
     fun `url loader writes local path download`() = runTest {
         val root = createTempDirectory("download-task")
@@ -371,13 +424,95 @@ class DownloadTaskJvmFailureAndEdgeCaseTest {
     }
 
     @Test
-    fun `cancelling url loader cancels the call without publishing staged bytes`() = runBlocking {
+    fun `cancelling direct data loader stops streaming reads and discards provisional output`() = runBlocking<Unit> {
+        lateinit var collection: Job
+        var source: Source? = null
+        var stagedOutput: Sink? = null
+        var firstRead = 0L
+        var probeObservedCancellation = false
+        var nextReadObservedCancellation = false
+        var processedAfterCancellation = false
+        var completed = false
+        val original = "original".encodeToByteArray()
+        val sink = Buffer().apply { write(original) }
+        val codec = object : FileEncryptionCodec by CopyingFileEncryptionCodec() {
+            override fun decrypt(input: ByteArray, key: ByteArray): ByteArray =
+                error("Direct downloads must use the streaming codec")
+
+            override fun decrypt(
+                input: Source,
+                output: Sink,
+                key: ByteArray,
+                checkCancellation: () -> Unit,
+            ) {
+                source = input
+                stagedOutput = output
+                val buffer = Buffer()
+                firstRead = input.readAtMostTo(buffer, 64L * 1024)
+                output.write(buffer, firstRead)
+                collection.cancel()
+                probeObservedCancellation =
+                    runCatching(checkCancellation).exceptionOrNull() is CancellationException
+                try {
+                    input.readAtMostTo(buffer, 64L * 1024)
+                    processedAfterCancellation = true
+                } catch (failure: CancellationException) {
+                    nextReadObservedCancellation = true
+                    throw failure
+                }
+            }
+        }
+        val task = downloadTask(responseBody = ByteArray(0), fileEncryptionCodec = codec)
+        collection = launch(start = CoroutineStart.LAZY) {
+            task.fileLoader(
+                data = ByteArray(128 * 1024) { it.toByte() },
+                key = byteArrayOf(1),
+                writer = DownloadWriter.SinkWriter(sink),
+            ).collect { progress ->
+                if (progress is DownloadProgress.Complete) completed = true
+            }
+        }
+        collection.start()
+        collection.join()
+
+        assertTrue(collection.isCancelled)
+        assertTrue(firstRead > 0L)
+        assertTrue(probeObservedCancellation)
+        assertTrue(nextReadObservedCancellation)
+        assertFalse(processedAfterCancellation)
+        assertFalse(completed)
+        assertContentEquals(original, sink.readByteArray())
+        assertFailsWith<IllegalStateException> { requireNotNull(source).readByte() }
+        assertFailsWith<IllegalStateException> { requireNotNull(stagedOutput).writeByte(1) }
+    }
+
+    @Test
+    fun `cancelling url loader cancels the call without publishing staged bytes`() =
+        assertLoaderCancellation()
+
+    @Test
+    fun `cancelling encrypted url loader abandons authenticated file staging`() {
+        val codec = FileEncryptionCodecJvm(CryptoGeneratorJvm())
+        val key = ByteArray(FILE_ENCRYPTION_KEY_SIZE_BYTES) { it.toByte() }
+        val frame = codec.encrypt(ByteArray(128 * 1024) { it.toByte() }, key)
+        assertLoaderCancellation(
+            key = key,
+            codec = codec,
+            prefix = frame.copyOf(FileEncryptionFormat.HEADER_LENGTH + 64 * 1024),
+        )
+    }
+
+    private fun assertLoaderCancellation(
+        key: ByteArray? = null,
+        codec: FileEncryptionCodec = CopyingFileEncryptionCodec(),
+        prefix: ByteArray = byteArrayOf(),
+    ) = runBlocking {
         val original = "original".encodeToByteArray()
         val sink = Buffer().apply {
             write(original)
         }
-        val responseBody = CancellableResponseBody()
-        val task = downloadTask(responseBody = responseBody)
+        val responseBody = CancellableResponseBody(prefix)
+        val task = downloadTask(responseBody = responseBody, fileEncryptionCodec = codec)
         val completed = AtomicBoolean(false)
 
         val collection = launch(
@@ -387,7 +522,7 @@ class DownloadTaskJvmFailureAndEdgeCaseTest {
             task
                 .fileLoader(
                     url = "https://example.com/payload.bin",
-                    key = null,
+                    key = key,
                     writer = DownloadWriter.SinkWriter(sink),
                 )
                 .collect { progress ->
@@ -492,7 +627,8 @@ private class FailingResponseBody(
     override fun source() = responseSource
 }
 
-private class CancellableResponseBody : ResponseBody() {
+private class CancellableResponseBody(prefix: ByteArray = byteArrayOf()) : ResponseBody() {
+    private val initialBytes = OkioBuffer().write(prefix)
     lateinit var call: Call
     val readStarted = CountDownLatch(1)
     val closed = AtomicBoolean(false)
@@ -502,6 +638,7 @@ private class CancellableResponseBody : ResponseBody() {
             sink: OkioBuffer,
             byteCount: Long,
         ): Long {
+            if (initialBytes.size > 0L) return initialBytes.read(sink, byteCount)
             readStarted.countDown()
             while (!call.isCanceled()) {
                 Thread.yield()
@@ -554,6 +691,7 @@ private class CopyingFileEncryptionCodec : FileEncryptionCodec {
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ) {
         output.write(input.readByteArray())
     }
@@ -567,6 +705,7 @@ private class CopyingFileEncryptionCodec : FileEncryptionCodec {
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ): FileEncryptionCodec.EncryptionResult {
         val data = input.readByteArray()
         output.write(data)
@@ -589,6 +728,7 @@ private class ByteArrayDecryptingFileEncryptionCodec(
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ) {
         output.write(plain)
     }
@@ -602,6 +742,7 @@ private class ByteArrayDecryptingFileEncryptionCodec(
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ): FileEncryptionCodec.EncryptionResult {
         val data = input.readByteArray()
         output.write(data)
@@ -622,6 +763,7 @@ private class FailingFileEncryptionCodec : FileEncryptionCodec {
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ) {
         output.write("partial".encodeToByteArray())
         throw IOException("Message authentication codes do not match!")
@@ -636,6 +778,7 @@ private class FailingFileEncryptionCodec : FileEncryptionCodec {
         input: Source,
         output: Sink,
         key: ByteArray,
+        checkCancellation: () -> Unit,
     ): FileEncryptionCodec.EncryptionResult {
         val data = input.readByteArray()
         output.write(data)

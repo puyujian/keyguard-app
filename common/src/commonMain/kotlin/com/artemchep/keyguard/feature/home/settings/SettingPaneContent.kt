@@ -27,7 +27,6 @@ import com.artemchep.keyguard.feature.home.settings.component.settingAboutTeamPr
 import com.artemchep.keyguard.feature.home.settings.component.settingAboutTelegramProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingApkProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAppIconsProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingAutotypeTestProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillBlockUriProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillCopyTotpProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillDefaultMatchDetectionProvider
@@ -40,6 +39,7 @@ import com.artemchep.keyguard.feature.home.settings.component.settingAutofillPro
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillRespectAutofillOffProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillSaveRequestProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingAutofillSaveUriProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingAutotypeTestProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingBackupSettings
 import com.artemchep.keyguard.feature.home.settings.component.settingBiometricsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingBiometricsRequireConfirmationProvider
@@ -67,11 +67,26 @@ import com.artemchep.keyguard.feature.home.settings.component.settingFeaturesOve
 import com.artemchep.keyguard.feature.home.settings.component.settingFeedbackAppProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingFontProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingGitHubProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentApprovalCachePolicyProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentApprovalWindowProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentDisplayKeyNamesProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentFiltersProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentHistoryProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentLocalStorageInfoProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentSetupProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverAutoRefreshProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverProtocolProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverRefreshIntervalProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverSearchProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverUrlProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingGpgSettingsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingGravatarProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingHibpApiTokenProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingKeepScreenOnProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingLaunchAppPicker
 import com.artemchep.keyguard.feature.home.settings.component.settingLaunchYubiKey
+import com.artemchep.keyguard.feature.home.settings.component.settingLicenseClaimProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingLocalizationProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingLogsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingMarkdownProvider
@@ -83,6 +98,7 @@ import com.artemchep.keyguard.feature.home.settings.component.settingNavigationI
 import com.artemchep.keyguard.feature.home.settings.component.settingOpenSourceLicensesProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingPermissionCameraProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingPermissionDetailsProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingPermissionLocalNetworkProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingPermissionOtherProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingPermissionPostNotificationsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingPermissionWriteExternalStorageProvider
@@ -96,33 +112,18 @@ import com.artemchep.keyguard.feature.home.settings.component.settingScreenDelay
 import com.artemchep.keyguard.feature.home.settings.component.settingScreenshotsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSectionProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSelectLocaleProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentApprovalWindowProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentApprovalCachePolicyProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentApprovalWindowProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentDisplayKeyNamesProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentLocalStorageInfoProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentFiltersProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentHistoryProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentLocalStorageInfoProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSshAgentSetupProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentApprovalWindowProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentApprovalCachePolicyProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentDisplayKeyNamesProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentLocalStorageInfoProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentSetupProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentFiltersProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgAgentHistoryProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverSearchProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverUrlProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverProtocolProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverAutoRefreshProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgKeyserverRefreshIntervalProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingGpgSettingsProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingSshSettingsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSubscriptionsDebug
 import com.artemchep.keyguard.feature.home.settings.component.settingSubscriptionsPlayStoreProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingSubscriptionsProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingLicenseClaimProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingSshSettingsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingThemeExpressiveProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingThemeUseAmoledDarkProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingTwoPanelLayoutLandscapeProvider
@@ -136,9 +137,11 @@ import com.artemchep.keyguard.feature.home.settings.component.settingVaultLockAf
 import com.artemchep.keyguard.feature.home.settings.component.settingVaultLockAfterTimeoutProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingVaultLockProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingVaultPersistProvider
-import com.artemchep.keyguard.feature.home.settings.component.settingYubiKeyUnlockProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingWebDavTransactionsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingWebsiteIconsProvider
 import com.artemchep.keyguard.feature.home.settings.component.settingWriteAccessProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingFido2UnlockProvider
+import com.artemchep.keyguard.feature.home.settings.component.settingYubiKeyUnlockProvider
 import com.artemchep.keyguard.feature.navigation.NavigationIcon
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.ui.ScaffoldLazyColumn
@@ -148,9 +151,8 @@ import com.artemchep.keyguard.ui.toolbar.util.ToolbarBehavior
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import org.kodein.di.DirectDI
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
+import org.koin.compose.currentKoinScope
+import org.koin.core.scope.Scope
 
 object Setting {
     const val DIVIDER = "divider"
@@ -181,10 +183,12 @@ object Setting {
     const val PERMISSION_DETAILS = "permission_details" // screen
     const val PERMISSION_OTHER = "permission_other"
     const val PERMISSION_CAMERA = "permission_camera"
+    const val PERMISSION_LOCAL_NETWORK = "permission_local_network"
     const val PERMISSION_WRITE_EXTERNAL_STORAGE = "permission_write_external_storage"
     const val PERMISSION_POST_NOTIFICATION = "permission_post_notification"
     const val BIOMETRIC = "biometric"
     const val BIOMETRIC_REQUIRE_CONFIRMATION = "biometric_require_confirmation"
+    const val FIDO2_UNLOCK = "fido2_unlock"
     const val YUBIKEY_UNLOCK = "yubikey_unlock"
     const val VAULT_PERSIST = "vault_persist"
     const val VAULT_CLEAR = "vault_clear"
@@ -222,6 +226,7 @@ object Setting {
     const val LOGS = "logs"
     const val FEATURES_OVERVIEW = "features_overview"
     const val URL_OVERRIDE = "url_override"
+    const val WEBDAV_TRANSACTIONS = "webdav_transactions"
     const val CONNECTED_APPS = "connected_apps"
     const val SSH_SETTINGS = "ssh_settings"
     const val SSH_AGENT = "ssh_agent"
@@ -284,7 +289,7 @@ val LocalSettingItemArgs = staticCompositionLocalOf<Any?> {
     null
 }
 
-val hub = mapOf<String, (DirectDI) -> SettingComponent>(
+val hub = mapOf<String, (Scope) -> SettingComponent>(
     Setting.CREDENTIAL_PROVIDER to ::settingCredentialProviderProvider,
     Setting.AUTOFILL to ::settingAutofillProvider,
     Setting.AUTOFILL_DEFAULT_MATCH_DETECTION to ::settingAutofillDefaultMatchDetectionProvider,
@@ -311,10 +316,12 @@ val hub = mapOf<String, (DirectDI) -> SettingComponent>(
     Setting.PERMISSION_DETAILS to ::settingPermissionDetailsProvider,
     Setting.PERMISSION_OTHER to ::settingPermissionOtherProvider,
     Setting.PERMISSION_CAMERA to ::settingPermissionCameraProvider,
+    Setting.PERMISSION_LOCAL_NETWORK to ::settingPermissionLocalNetworkProvider,
     Setting.PERMISSION_POST_NOTIFICATION to ::settingPermissionPostNotificationsProvider,
     Setting.PERMISSION_WRITE_EXTERNAL_STORAGE to ::settingPermissionWriteExternalStorageProvider,
     Setting.BIOMETRIC to ::settingBiometricsProvider,
     Setting.BIOMETRIC_REQUIRE_CONFIRMATION to ::settingBiometricsRequireConfirmationProvider,
+    Setting.FIDO2_UNLOCK to ::settingFido2UnlockProvider,
     Setting.YUBIKEY_UNLOCK to ::settingYubiKeyUnlockProvider,
     Setting.VAULT_PERSIST to ::settingVaultPersistProvider,
     Setting.VAULT_CLEAR to ::settingVaultClearProvider,
@@ -352,6 +359,7 @@ val hub = mapOf<String, (DirectDI) -> SettingComponent>(
     Setting.LOGS to ::settingLogsProvider,
     Setting.FEATURES_OVERVIEW to ::settingFeaturesOverviewProvider,
     Setting.URL_OVERRIDE to ::settingUrlOverrideProvider,
+    Setting.WEBDAV_TRANSACTIONS to ::settingWebDavTransactionsProvider,
     Setting.CONNECTED_APPS to ::settingConnectedAppsProvider,
     Setting.SSH_SETTINGS to ::settingSshSettingsProvider,
     Setting.SSH_AGENT to ::settingSshAgentProvider,
@@ -423,7 +431,7 @@ fun SettingPaneContent(
 fun rememberSettingPaneState(
     items: List<SettingPaneItem>,
 ): State<SettingPaneState> {
-    val di = localDI()
+    val di = currentKoinScope()
     return remember(items, di, hub) {
         val platform = CurrentPlatform
 
@@ -432,7 +440,7 @@ fun rememberSettingPaneState(
             group: String = "",
             args: Any? = null,
         ) = hub[item.key]
-            ?.invoke(di.direct)
+            ?.invoke(di)
             ?.map { content ->
                 val compositeKey = group + ":" + item.key + ":" + item.suffix
                 SettingPaneState.Component(

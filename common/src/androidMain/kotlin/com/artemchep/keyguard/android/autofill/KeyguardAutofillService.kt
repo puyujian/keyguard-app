@@ -9,6 +9,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.CancellationSignal
 import android.service.autofill.*
+import android.view.autofill.AutofillId
 import android.widget.RemoteViews
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
@@ -20,6 +21,7 @@ import arrow.optics.Getter
 import com.artemchep.keyguard.android.AutofillActivity
 import com.artemchep.keyguard.android.AutofillFakeAuthActivity
 import com.artemchep.keyguard.android.AutofillSaveActivity
+import com.artemchep.keyguard.android.AutofillVerifyActivity
 import com.artemchep.keyguard.android.MainActivity
 import com.artemchep.keyguard.android.PendingIntents
 import com.artemchep.keyguard.android.autofill.v2.DefaultStructureParserV2
@@ -30,24 +32,24 @@ import com.artemchep.keyguard.common.model.*
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.logging.postDebug
 import com.artemchep.keyguard.common.usecase.*
+import com.artemchep.keyguard.di.KeyguardKoinOwner
+import com.artemchep.keyguard.di.keyguardKoin
+import com.artemchep.keyguard.di.resolve
 import com.artemchep.keyguard.feature.home.vault.component.FormatCardGroupLength
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import io.ktor.http.*
+import kotlin.collections.take
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.emptyFlow
 import org.jetbrains.compose.resources.StringResource
-import org.kodein.di.DIAware
-import org.kodein.di.android.closestDI
-import org.kodein.di.direct
-import org.kodein.di.instance
-import kotlin.collections.take
-import kotlin.coroutines.CoroutineContext
 
-class KeyguardAutofillService : AutofillService(), DIAware {
+class KeyguardAutofillService : AutofillService(), KeyguardKoinOwner {
     companion object {
         private const val TAG = "AFService"
 
@@ -63,7 +65,7 @@ class KeyguardAutofillService : AutofillService(), DIAware {
             get() = Dispatchers.Main + job
     }
 
-    override val di by closestDI { this }
+    override val koin get() = this.keyguardKoin()
 
     private sealed interface Vault {
         class Open(
@@ -86,23 +88,29 @@ class KeyguardAutofillService : AutofillService(), DIAware {
         ).bind().take(SUGGESTIONS_MAX_COUNT)
     }
 
+    /** Everything a single unlocked session contributes to [Vault.Open]. */
+    private class VaultOpenServices(
+        val getCiphers: GetCiphers,
+        val getProfiles: GetProfiles,
+        val getSuggestions: GetSuggestions<DSecret>,
+        val equivalentDomainsBuilderFactory: EquivalentDomainsBuilderFactory,
+    )
+
     private fun getVaultOpenFlow(
         session: MasterSession.Key,
     ): Flow<Vault.Open> {
-        val getCiphers = session.di.direct.instance<GetCiphers>()
-        val getProfiles = session.di.direct.instance<GetProfiles>()
-        val getSuggestions = kotlin.run {
-            val model = session.di.direct
-                .instance<GetSuggestions<Any?>>()
-            GetCipherSuggestions(model)
-        }
-
-        val equivalentDomainsBuilderFactory =
-            session.di.direct.instance<EquivalentDomainsBuilderFactory>()
+        val services = session.session.resolve {
+            VaultOpenServices(
+                getCiphers = get<GetCiphers>(),
+                getProfiles = get<GetProfiles>(),
+                getSuggestions = GetCipherSuggestions(get<GetSuggestions<Any?>>()),
+                equivalentDomainsBuilderFactory = get<EquivalentDomainsBuilderFactory>(),
+            )
+        } ?: return emptyFlow()
 
         val ciphersRawFlow = filterHiddenProfiles(
-            getProfiles = getProfiles,
-            getCiphers = getCiphers,
+            getProfiles = services.getProfiles,
+            getCiphers = services.getCiphers,
             filter = null,
         )
         val ciphersFlow = ciphersRawFlow
@@ -115,15 +123,15 @@ class KeyguardAutofillService : AutofillService(), DIAware {
             .map { ciphers ->
                 Vault.Open(
                     ciphers = ciphers,
-                    getSuggestions = getSuggestions,
-                    equivalentDomainsBuilderFactory = equivalentDomainsBuilderFactory,
+                    getSuggestions = services.getSuggestions,
+                    equivalentDomainsBuilderFactory = services.equivalentDomainsBuilderFactory,
                 )
             }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val vaultFlow by lazy {
-        val model: GetVaultSession by di.instance()
+        val model: GetVaultSession by lazy { koin.get() }
         model()
             .distinctUntilChanged()
             .flatMapLatest { session ->
@@ -145,44 +153,44 @@ class KeyguardAutofillService : AutofillService(), DIAware {
     }
 
     private val logRepository: LogRepository by lazy {
-        di.direct.instance()
+        koin.get()
     }
 
     private val getTotpCode: GetTotpCode by lazy {
-        di.direct.instance()
+        koin.get()
     }
 
     private val blockedUrlCheck: BlockedUrlCheck by lazy {
-        di.direct.instance()
+        koin.get()
     }
 
     private val prefDefaultMatchDetectionFlow by lazy {
-        val model: GetAutofillDefaultMatchDetection by di.instance()
+        val model: GetAutofillDefaultMatchDetection by lazy { koin.get() }
         model()
     }
 
     private val prefInlineSuggestionsFlow by lazy {
-        val model: GetAutofillInlineSuggestions by di.instance()
+        val model: GetAutofillInlineSuggestions by lazy { koin.get() }
         model()
     }
 
     private val prefManualSelectionFlow by lazy {
-        val model: GetAutofillManualSelection by di.instance()
+        val model: GetAutofillManualSelection by lazy { koin.get() }
         model()
     }
 
     private val prefRespectAutofillOffFlow by lazy {
-        val model: GetAutofillRespectAutofillOff by di.instance()
+        val model: GetAutofillRespectAutofillOff by lazy { koin.get() }
         model()
     }
 
     private val prefSaveRequestFlow by lazy {
-        val model: GetAutofillSaveRequest by di.instance()
+        val model: GetAutofillSaveRequest by lazy { koin.get() }
         model()
     }
 
     private val prefBlockedUrisFlow by lazy {
-        val model: GetAutofillBlockedUrisExposed by di.instance()
+        val model: GetAutofillBlockedUrisExposed by lazy { koin.get() }
         model()
     }
 
@@ -640,7 +648,9 @@ class KeyguardAutofillService : AutofillService(), DIAware {
         val title = secret.name
         val text = kotlin.run {
             secret.login?.username?.also { return@run it }
-            secret.card?.number?.also { return@run it }
+            secret.card?.number
+                ?.takeUnless { secret.reprompt }
+                ?.also { return@run it }
             secret.uris.firstOrNull()
                 ?.uri
                 ?.also { return@run it }
@@ -656,14 +666,17 @@ class KeyguardAutofillService : AutofillService(), DIAware {
             structItems = struct.items,
             getTotpCode = getTotpCode,
         )
+        val datasetFields = DatasetBuilder.fields(
+            structItems = struct.items,
+            structData = fields,
+        )
 
-        fun createDatasetBuilder(): Dataset.Builder {
+        fun createDatasetBuilder(
+            values: Map<AutofillId, DatasetBuilder.FieldData?> = datasetFields,
+        ): Dataset.Builder {
             val builder = DatasetBuilder.create(
                 menuPresentation = views,
-                fields = DatasetBuilder.fields(
-                    structItems = struct.items,
-                    structData = fields,
-                ),
+                fields = values,
                 provideInlinePresentation = provideInlinePresentation,
             )
             builder.setId(secret.id)
@@ -694,11 +707,17 @@ class KeyguardAutofillService : AutofillService(), DIAware {
             // Authentication is optional; return the fillable dataset without it.
         }
 
-        return try {
-            builder.build()
-        } catch (_: Exception) {
-            null // not a single value set
-        }
+        // The re-prompt protects the values, so offer a dataset
+        // without them that fills the fields after the user verifies.
+        return AutofillVerifyActivity.buildDatasetOrNull(
+            context = this,
+            builder = builder,
+            createEmptyBuilder = {
+                createDatasetBuilder(datasetFields.mapValues { null })
+            },
+            cipherName = secret.name,
+            requiresUserVerification = secret.reprompt,
+        )
     }
 
     @RequiresApi(Build.VERSION_CODES.R)

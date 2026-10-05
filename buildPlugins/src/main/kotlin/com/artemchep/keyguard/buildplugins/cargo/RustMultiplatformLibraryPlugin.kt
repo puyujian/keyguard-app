@@ -6,12 +6,10 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.tasks.TaskProvider
-import org.gradle.kotlin.dsl.configure
+import org.gradle.kotlin.dsl.create
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
-import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 /**
  * Builds the conventional Rust libraries that back a Kotlin Multiplatform utility module.
@@ -20,44 +18,42 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
  * `keyguard-io-jni` and `keyguard-io-c`. The resulting libraries are named
  * `keyguard_io_jni` and `keyguard_io_c`.
  */
-class RustMultiplatformLibraryPlugin : Plugin<Project> {
+open class RustMultiplatformLibraryPlugin : Plugin<Project> {
+    /**
+     * Whether Android and iOS get Rust builds. Plugin variants decide this at apply time:
+     * the convention targets already exist, so the Apple cinterops are created immediately.
+     */
+    protected open val mobileTargets: Boolean = true
+
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("keyguard.cargo-common")
 
-        val moduleName = name.replace('-', '_')
-        val moduleTaskName = name.toTaskSuffix()
-        val nativeTaskName = "Native$moduleTaskName"
-        val cargoPackagePrefix = "keyguard-${name.replace('_', '-')}"
-        val nativeLibraryPrefix = "keyguard_$moduleName"
-        val rustSourceDirectory = layout.projectDirectory.dir("rust")
+        val extension = extensions.create<RustMultiplatformLibraryExtension>("keyguardRust", project)
+        extension.extraSourceInputs.from(sharedFfiRustSources())
+        val naming = RustModuleNaming(this)
+        val moduleName = naming.moduleName
+        val moduleTaskName = naming.moduleTaskName
+        val nativeTaskName = naming.nativeTaskName
+        val cargoPackagePrefix = naming.cargoPackagePrefix
+        val nativeLibraryPrefix = naming.nativeLibraryPrefix
+        val rustSourceDirectory = naming.rustSourceDirectory
         val hostPlatform = detectHostPlatform()
         val desktopLibraryFileName = hostPlatform.dynamicLibraryName("${nativeLibraryPrefix}_jni")
         val desktopCargoTaskName = "cargoBuild${nativeTaskName}Desktop"
         val desktopCompileTaskName = "compile${nativeTaskName}Desktop"
-        val cargoOffline = providers.gradleProperty(
-            "keyguard.native$moduleTaskName.cargoOffline",
-        )
-            .orElse(providers.gradleProperty("keyguard.nativeCargo.cargoOffline"))
-            // Compatibility with release jobs that predate the reusable
-            // native-Cargo convention. Remove after those jobs migrate.
-            .orElse(providers.gradleProperty("keyguard.nativeCrypto.cargoOffline"))
-            .map(String::toBooleanStrict)
-            .orElse(false)
+        val cargoOffline = cargoOfflineProvider(moduleTaskName)
 
-        extensions.configure<CargoCommonExtension> {
+        val cargoExtension = extensions.getByType<CargoCommonExtension>().apply {
             sourceDir.set(rustSourceDirectory)
-            rustTarget.set(hostPlatform.desktopLibRustTarget)
+            extraSourceInputs.from(extension.extraSourceInputs)
             cargoPackage.set("$cargoPackagePrefix-jni")
             cargoArguments.add("--locked")
             cargoBinaryName.set(desktopLibraryFileName)
-            packagedBinaryName.set(desktopLibraryFileName)
-            composeResourceDir.set(hostPlatform.composeResourceDir)
-            cargoTaskName.set(desktopCargoTaskName)
-            compileTaskName.set(desktopCompileTaskName)
-            platformMacOs.set(hostPlatform.isMacOs)
-            platformWindows.set(hostPlatform.isWindows)
-            markExecutable.set(true)
         }
+        val desktopTasks = cargoExtension.register(
+            compileTaskName = desktopCompileTaskName,
+            cargoTaskName = desktopCargoTaskName,
+        )
 
         tasks.withType<CargoBuildTask>().configureEach {
             offline.set(cargoOffline)
@@ -67,77 +63,72 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
             "verify${nativeTaskName}DesktopRustTarget",
         ) {
             sourceDir.set(rustSourceDirectory)
-            rustTarget.set(hostPlatform.desktopLibRustTarget)
+            rustTarget.set(hostPlatform.rustTarget)
         }
-        tasks.matching { task -> task.name == desktopCargoTaskName }.configureEach {
+        desktopTasks.build.configure {
             dependsOn(verifyDesktopRustTarget)
         }
 
-        val androidTargets = androidNativeTargets()
-        val androidPrepareTasks = registerAndroidLibraries(
-            nativeTaskName = nativeTaskName,
-            cargoPackage = "$cargoPackagePrefix-jni",
-            nativeLibraryName = "${nativeLibraryPrefix}_jni",
-            rustSourceDirectory = rustSourceDirectory,
-            targets = androidTargets,
-        )
-        configureAndroidPackaging(
-            nativeTaskName = nativeTaskName,
-            prepareTasks = androidPrepareTasks,
-        )
+        val compileAndroidAll = if (mobileTargets) {
+            val androidPrepareTasks = registerAndroidLibraries(
+                nativeTaskName = nativeTaskName,
+                cargoPackage = "$cargoPackagePrefix-jni",
+                nativeLibraryName = "${nativeLibraryPrefix}_jni",
+                rustSourceDirectory = rustSourceDirectory,
+                targets = androidNativeTargets(),
+                extension = extension,
+            )
+            configureAndroidPackaging(
+                nativeTaskName = nativeTaskName,
+                prepareTasks = androidPrepareTasks,
+            )
+            tasks.register("compile${nativeTaskName}AndroidAll") {
+                group = "build"
+                description =
+                    "Builds and verifies $nativeTaskName JNI libraries for every supported Android ABI."
+                dependsOn(androidPrepareTasks)
+            }
+        } else {
+            null
+        }
 
         val appleTargets = appleNativeTargets()
+            .filter { target -> mobileTargets || target.kotlinTarget.startsWith("macos") }
         val appleCargoTasks = registerAppleLibraries(
             nativeTaskName = nativeTaskName,
             cargoPackage = "$cargoPackagePrefix-c",
             nativeLibraryName = "${nativeLibraryPrefix}_c",
             rustSourceDirectory = rustSourceDirectory,
             targets = appleTargets,
+            extraSourceInputs = extension.extraSourceInputs,
         )
         configureAppleInterop(
             moduleName = moduleName,
             moduleTaskName = moduleTaskName,
-            nativeTaskName = nativeTaskName,
             rustSourceDirectory = rustSourceDirectory,
             targets = appleTargets,
             cargoTasks = appleCargoTasks,
         )
 
-        val compileAndroidAll = tasks.register("compile${nativeTaskName}AndroidAll") {
-            group = "build"
-            description =
-                "Builds and verifies $nativeTaskName JNI libraries for every supported Android ABI."
-            dependsOn(androidPrepareTasks)
-        }
-        val compileAppleAll = tasks.register("compile${nativeTaskName}AppleAll") {
-            group = "build"
-            description = "Builds $nativeTaskName static libraries for all supported Apple targets."
-            dependsOn(appleCargoTasks.values)
-        }
-        appleCargoTasks.forEach { (targetName, cargoTask) ->
-            tasks.register("compile$nativeTaskName${targetName.replaceFirstChar(Char::uppercaseChar)}") {
-                group = "build"
-                description = "Builds the $nativeTaskName static library for $targetName."
-                dependsOn(cargoTask)
-            }
-        }
+        val compileAppleAll = registerAppleAggregateTasks(
+            nativeTaskName = nativeTaskName,
+            cargoTasks = appleCargoTasks,
+        )
         tasks.register("$desktopCompileTaskName${hostPlatform.name}") {
             group = "build"
             description =
                 "Builds the $nativeTaskName JNI library for the current ${hostPlatform.name} host."
-            dependsOn(desktopCompileTaskName)
+            dependsOn(desktopTasks.compile)
         }
         tasks.register("compile${nativeTaskName}All") {
             group = "build"
-            description =
-                "Builds $nativeTaskName artifacts for Android, the current Desktop host, and Apple."
-            dependsOn(compileAndroidAll)
-            dependsOn(compileAppleAll)
-            dependsOn(desktopCompileTaskName)
+            description = "Builds $nativeTaskName artifacts for every supported platform."
+            dependsOn(listOfNotNull(compileAndroidAll, compileAppleAll, desktopTasks.compile))
         }
-        tasks.matching { task -> task.name == "assemble" }.configureEach {
-            dependsOn(desktopCompileTaskName)
+        tasks.named("assemble") {
+            dependsOn(desktopTasks.compile)
         }
+        Unit
     }
 
     private fun Project.registerAndroidLibraries(
@@ -146,6 +137,7 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
         nativeLibraryName: String,
         rustSourceDirectory: org.gradle.api.file.Directory,
         targets: List<AndroidNativeTarget>,
+        extension: RustMultiplatformLibraryExtension,
     ): List<TaskProvider<PrepareNativeLibraryTask>> {
         val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
         val androidMinSdk = libs.findVersion("androidMinSdk").get().requiredVersion.toInt()
@@ -193,6 +185,8 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
                     fileTree(rustSourceDirectory) {
                         exclude("target/**", "**/target/**")
                     },
+                    extension.extraSourceInputs.asFileTree,
+                    extension.androidCmakeToolchainFile.map { listOf(it) }.orElse(emptyList()),
                 )
                 this.cargoTargetDir.set(cargoTargetDirectory)
                 rustTarget.set(target.rustTarget)
@@ -220,6 +214,14 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
                 environmentVariables.put(
                     AndroidCargoEnvironment.targetEnvironmentName("RANLIB", target.rustTarget),
                     androidBuildTools.map { tools -> tools.ranlib.absolutePath },
+                )
+                environmentVariables.putAll(
+                    extension.androidCmakeToolchainFile.map { toolchainFile ->
+                        mapOf(
+                            AndroidCargoEnvironment.targetEnvironmentName("CMAKE_TOOLCHAIN_FILE", target.rustTarget) to
+                                toolchainFile.asFile.absolutePath,
+                        )
+                    }.orElse(emptyMap()),
                 )
                 environmentVariables.put("KEYGUARD_ANDROID_ABI", target.androidAbi)
                 environmentVariables.put(
@@ -281,108 +283,9 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
         }
     }
 
-    private fun Project.registerAppleLibraries(
-        nativeTaskName: String,
-        cargoPackage: String,
-        nativeLibraryName: String,
-        rustSourceDirectory: org.gradle.api.file.Directory,
-        targets: List<AppleNativeTarget>,
-    ): Map<String, TaskProvider<CargoBuildTask>> = targets.associate { target ->
-        val suffix = target.kotlinTarget.replaceFirstChar(Char::uppercaseChar)
-        val cargoTargetDirectory = layout.buildDirectory
-            .dir(
-                "native-${name.replace('_', '-')}-cargo-target/" +
-                    "apple/${target.rustTarget}",
-            )
-        val cargoOutputBinary = cargoTargetDirectory.map { directory ->
-            directory.file(
-                "${target.rustTarget}/release/lib$nativeLibraryName.a",
-            )
-        }
-        val verifyRustTarget = tasks.register<VerifyRustTargetInstalledTask>(
-            "verify$nativeTaskName${suffix}RustTarget",
-        ) {
-            sourceDir.set(rustSourceDirectory)
-            rustTarget.set(target.rustTarget)
-        }
-        val cargoBuild = tasks.register<CargoBuildTask>("cargoBuild$nativeTaskName$suffix") {
-            dependsOn(verifyRustTarget)
-            sourceDir.set(rustSourceDirectory)
-            sourceFiles.from(
-                fileTree(rustSourceDirectory) {
-                    exclude("target/**", "**/target/**")
-                },
-            )
-            this.cargoTargetDir.set(cargoTargetDirectory)
-            rustTarget.set(target.rustTarget)
-            this.cargoPackage.set(cargoPackage)
-            cargoArguments.add("--locked")
-            outputBinary.set(cargoOutputBinary)
-        }
-        target.kotlinTarget to cargoBuild
-    }
-
-    private fun Project.configureAppleInterop(
-        moduleName: String,
-        moduleTaskName: String,
-        nativeTaskName: String,
-        rustSourceDirectory: org.gradle.api.file.Directory,
-        targets: List<AppleNativeTarget>,
-        cargoTasks: Map<String, TaskProvider<CargoBuildTask>>,
-    ) {
-        pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
-            val kotlin = extensions.getByType<KotlinMultiplatformExtension>()
-            kotlin.targets.withType<KotlinNativeTarget>().configureEach {
-                val nativeTarget = this
-                val targetSpec = targets.firstOrNull { target ->
-                    target.kotlinTarget == nativeTarget.name
-                } ?: return@configureEach
-                val cargoBuild = checkNotNull(cargoTasks[nativeTarget.name])
-                val staticLibraryDirectory = layout.buildDirectory
-                    .dir(
-                        "native-${moduleName.replace('_', '-')}-cargo-target/" +
-                            "apple/${targetSpec.rustTarget}/${targetSpec.rustTarget}/release",
-                    )
-                    .get()
-                    .asFile
-                    .absolutePath
-
-                compilations.getByName("main").cinterops.create("native$moduleTaskName") {
-                    definitionFile.set(
-                        layout.projectDirectory.file(
-                            "src/nativeInterop/cinterop/native$moduleTaskName.def",
-                        ),
-                    )
-                    packageName("com.artemchep.keyguard.util.$moduleName.ffi")
-                    includeDirs(
-                        rustSourceDirectory.dir(
-                            "crates/keyguard-${moduleName.replace('_', '-')}-c/include",
-                        ),
-                    )
-                    extraOpts("-libraryPath", staticLibraryDirectory)
-                }
-                kotlin.sourceSets.getByName("${nativeTarget.name}Main")
-                    .kotlin
-                    .srcDir("src/appleInteropMain/kotlin")
-
-                val interopTaskName =
-                    "cinterop$nativeTaskName${nativeTarget.name.replaceFirstChar(Char::uppercaseChar)}"
-                tasks.matching { task -> task.name == interopTaskName }.configureEach {
-                    dependsOn(cargoBuild)
-                    inputs.file(cargoBuild.flatMap { task -> task.outputBinary })
-                }
-            }
-        }
-    }
-
     private data class AndroidNativeTarget(
         val rustTarget: String,
         val androidAbi: String,
-    )
-
-    private data class AppleNativeTarget(
-        val kotlinTarget: String,
-        val rustTarget: String,
     )
 
     private fun androidNativeTargets(): List<AndroidNativeTarget> = listOf(
@@ -391,14 +294,4 @@ class RustMultiplatformLibraryPlugin : Plugin<Project> {
         AndroidNativeTarget("i686-linux-android", "x86"),
         AndroidNativeTarget("x86_64-linux-android", "x86_64"),
     )
-
-    private fun appleNativeTargets(): List<AppleNativeTarget> = listOf(
-        AppleNativeTarget("iosArm64", "aarch64-apple-ios"),
-        AppleNativeTarget("iosSimulatorArm64", "aarch64-apple-ios-sim"),
-        AppleNativeTarget("macosArm64", "aarch64-apple-darwin"),
-    )
-
-    private fun String.toTaskSuffix(): String = split('-', '_')
-        .filter(String::isNotBlank)
-        .joinToString("") { part -> part.replaceFirstChar(Char::uppercaseChar) }
 }

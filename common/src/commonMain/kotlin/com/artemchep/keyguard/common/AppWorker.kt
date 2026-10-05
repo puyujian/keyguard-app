@@ -9,11 +9,16 @@ import com.artemchep.keyguard.common.service.gpgagent.GpgPublicKeySyncer
 import com.artemchep.keyguard.common.service.gpgkeyserver.GpgKeyserverRefreshWorker
 import com.artemchep.keyguard.common.service.licensekey.impl.LicenseSyncer
 import com.artemchep.keyguard.common.service.pendinghistory.PendingUsageHistoryFlushRunner
+import com.artemchep.keyguard.common.service.session.AppWorkerSessionAccess
+import com.artemchep.keyguard.common.service.session.PendingUsageHistorySessionAccess
 import com.artemchep.keyguard.common.service.sshagent.SshAgentPublicKeySyncer
 import com.artemchep.keyguard.common.usecase.GetVaultSession
 import com.artemchep.keyguard.common.usecase.UpdateVersionLog
+import com.artemchep.keyguard.platform.CurrentPlatform
+import com.artemchep.keyguard.platform.Platform
 import com.artemchep.keyguard.platform.lifecycle.LeLifecycleState
 import com.artemchep.keyguard.platform.lifecycle.onState
+import com.artemchep.keyguard.platform.util.hasWatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -25,24 +30,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
-import org.kodein.di.DirectDI
-import org.kodein.di.direct
-import org.kodein.di.instance
 
 class AppWorkerIm(
     private val getVaultSession: GetVaultSession,
+    private val appWorkerSessionAccess: AppWorkerSessionAccess,
+    private val pendingUsageHistorySessionAccess: PendingUsageHistorySessionAccess,
     private val updateVersionLog: UpdateVersionLog,
     private val temporaryArtifactMaintenance: TemporaryArtifactMaintenance,
+    private val pendingUsageHistoryEnabled: Boolean,
 ) : AppWorker {
     companion object {
         private const val FILE_CLEANUP_DELAY_MS = 15_000L
     }
-
-    constructor(directDI: DirectDI) : this(
-        getVaultSession = directDI.instance(),
-        updateVersionLog = directDI.instance(),
-        temporaryArtifactMaintenance = directDI.instance(),
-    )
 
     override fun launch(
         scope: CoroutineScope,
@@ -62,6 +61,8 @@ class AppWorkerIm(
                 launchPendingUsageHistoryFlushWhenAvailable(
                     scope = this,
                     getVaultSession = getVaultSession,
+                    sessionAccess = pendingUsageHistorySessionAccess,
+                    enabled = pendingUsageHistoryEnabled,
                 )
             }
             .launchIn(this)
@@ -94,7 +95,7 @@ class AppWorkerIm(
     private fun launchSyncManagerWhenAvailable(scope: CoroutineScope) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<NotificationsWorker>()
+            key?.let(appWorkerSessionAccess::invoke)?.notificationsWorker
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { syncManager ->
@@ -113,7 +114,7 @@ class AppWorkerIm(
     private fun launchSyncExposedAccountsWhenAvailable(scope: CoroutineScope) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<ExposedAccountSyncer>()
+            key?.let(appWorkerSessionAccess::invoke)?.exposedAccountSyncer
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { syncManager ->
@@ -132,7 +133,7 @@ class AppWorkerIm(
     private fun launchSyncSshAgentWhenAvailable(scope: CoroutineScope) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<SshAgentPublicKeySyncer>()
+            key?.let(appWorkerSessionAccess::invoke)?.sshAgentPublicKeySyncer
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { syncManager ->
@@ -151,7 +152,7 @@ class AppWorkerIm(
     private fun launchSyncGpgAgentWhenAvailable(scope: CoroutineScope) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<GpgPublicKeySyncer>()
+            key?.let(appWorkerSessionAccess::invoke)?.gpgPublicKeySyncer
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { syncManager ->
@@ -170,7 +171,7 @@ class AppWorkerIm(
     private fun launchRefreshGpgKeyserverWhenAvailable(scope: CoroutineScope) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<GpgKeyserverRefreshWorker>()
+            key?.let(appWorkerSessionAccess::invoke)?.gpgKeyserverRefreshWorker
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { worker ->
@@ -191,7 +192,7 @@ class AppWorkerIm(
     ) = getVaultSession()
         .map { session ->
             val key = session as? MasterSession.Key
-            key?.di?.direct?.instance<LicenseSyncer>()
+            key?.let(appWorkerSessionAccess::invoke)?.licenseSyncer
         }
         .distinctUntilChanged { old, new -> old === new }
         .mapLatest { worker ->
@@ -209,18 +210,29 @@ class AppWorkerIm(
 internal fun launchPendingUsageHistoryFlushWhenAvailable(
     scope: CoroutineScope,
     getVaultSession: GetVaultSession,
-) = getVaultSession()
-    .map { session ->
-        val key = session as? MasterSession.Key
-        key?.di?.direct?.instance<PendingUsageHistoryFlushRunner>()
+    sessionAccess: PendingUsageHistorySessionAccess,
+    enabled: Boolean,
+): Job? {
+    if (!enabled) {
+        return null
     }
-    .distinctUntilChanged { old, new -> old === new }
-    .mapLatest { runner ->
-        runner?.run()
-            ?.attempt()
-            ?.bind()
-    }
-    .launchIn(scope)
+    return getVaultSession()
+        .map { session ->
+            val key = session as? MasterSession.Key
+            key?.let(sessionAccess::invoke)
+        }
+        .distinctUntilChanged { old, new -> old === new }
+        .mapLatest { runner ->
+            runner?.run()
+                ?.attempt()
+                ?.bind()
+        }
+        .launchIn(scope)
+}
+
+internal fun shouldLaunchPendingUsageHistoryFlush(
+    platform: Platform,
+): Boolean = !platform.hasWatch()
 
 interface AppWorker {
     enum class Feature {

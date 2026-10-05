@@ -1,5 +1,6 @@
 package com.artemchep.keyguard.feature.home.settings.component
 
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -12,18 +13,18 @@ import com.artemchep.keyguard.feature.navigation.NavigationIntent
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.platform.Platform
 import com.artemchep.keyguard.platform.util.hasWatch
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.icons.ChevronIcon
-import org.jetbrains.compose.resources.stringResource
+import com.artemchep.keyguard.ui.icons.KeyguardGpgKey
 import kotlinx.coroutines.flow.flow
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
+import org.jetbrains.compose.resources.stringResource
+import org.koin.core.scope.Scope
 
 fun settingGpgSettingsProvider(
-    directDI: DirectDI,
+    koinScope: Scope,
 ) = settingGpgSettingsProvider(
-    windowCoroutineScope = directDI.instance(),
+    windowCoroutineScope = koinScope.get(),
 )
 
 fun settingGpgSettingsProvider(
@@ -69,7 +70,7 @@ private fun SettingGpgSettings(
     onClick: (() -> Unit)?,
 ) {
     LocalSettingPaneComponents.current.KgAction(
-        icon = null,
+        icon = Icons.Outlined.KeyguardGpgKey,
         title = {
             Text(
                 text = stringResource(Res.string.pref_item_gpg_agent_title),

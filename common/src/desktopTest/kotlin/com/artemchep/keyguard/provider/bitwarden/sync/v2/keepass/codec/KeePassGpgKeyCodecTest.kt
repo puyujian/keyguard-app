@@ -6,6 +6,7 @@ import app.keemobile.kotpass.models.EntryFields
 import app.keemobile.kotpass.models.EntryValue
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadata
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadataKey
+import com.artemchep.keyguard.test.gpgMetadata
 import com.artemchep.keyguard.core.store.bitwarden.BitwardenCipher
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,6 +17,15 @@ import kotlin.uuid.Uuid
 
 class KeePassGpgKeyCodecTest {
     private val codec = KeePassGpgKeyCodec()
+
+    @Test
+    fun `both certificate fingerprint lengths survive KeePass fields`() {
+        for (length in listOf(40, 64)) {
+            val key = gpgKey().copy(fingerprint = "0123456789ABCDEF".repeat(4).take(length), metadata = null)
+            val writes = codec.encode(key)
+            assertEquals(key, decode(*writes.map { it.key to it.value }.toTypedArray()).gpgKey)
+        }
+    }
 
     @Test
     fun `encode writes gpg fields with concealment`() {
@@ -146,14 +156,12 @@ private fun gpgKey() = BitwardenCipher.GpgKey(
     metadata = metadata(),
 )
 
-private fun metadata() = GpgAgentKeyMetadata(
-    keys = listOf(
-        GpgAgentKeyMetadataKey(
+private fun metadata() = gpgMetadata(
+    GpgAgentKeyMetadataKey(
             keygrip = "keygrip-1",
             fingerprint = FINGERPRINT,
             algorithm = "rsa4096",
             capabilities = setOf("sign", "decrypt"),
-        ),
     ),
 )
 

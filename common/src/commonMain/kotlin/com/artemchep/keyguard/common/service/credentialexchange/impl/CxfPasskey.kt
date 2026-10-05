@@ -1,11 +1,11 @@
 package com.artemchep.keyguard.common.service.credentialexchange.impl
 
 import com.artemchep.keyguard.common.io.runCatchingNonFatal
-import com.artemchep.keyguard.common.service.crypto.PasskeyCrypto
-import com.artemchep.keyguard.common.service.crypto.PasskeyKeyInspectionResult
-import com.artemchep.keyguard.common.service.crypto.PasskeyKeyMaterial
-import com.artemchep.keyguard.common.service.webauthn.PasskeyBase64
-import com.artemchep.keyguard.common.service.webauthn.PasskeyCredentialId
+import com.artemchep.keyguard.util.webauthn.crypto.PasskeyCrypto
+import com.artemchep.keyguard.util.webauthn.crypto.PasskeyKeyInspectionResult
+import com.artemchep.keyguard.util.webauthn.crypto.PasskeyKeyMaterial
+import com.artemchep.keyguard.util.webauthn.PasskeyBase64
+import com.artemchep.keyguard.util.webauthn.PasskeyCredentialId
 
 internal const val MAX_ENCODED_PASSKEY_KEY_CHARS = 5_464
 internal const val MAX_ENCODED_PASSKEY_USER_HANDLE_CHARS = 88
@@ -66,9 +66,9 @@ internal fun mapCredentialId(
 /**
  * Validates a stored PKCS#8 DER private key and emits the native service's
  * canonical P-256 form as base64url. Keyguard's own creation flow persists the
- * value as standard base64, while synced vaults may carry base64url; both
- * alphabets are accepted, but strictly. Undecodable, malformed, or unsupported
- * keys return `null` and become counted skips.
+ * value as base64url, while legacy and imported vaults may carry standard
+ * base64; both alphabets are accepted, but strictly. Undecodable, malformed,
+ * or unsupported keys return `null` and become counted skips.
  */
 internal fun mapKey(
     keyValue: String,

@@ -26,7 +26,7 @@ and **RSA** keys are supported.
      Flatpak builds use
      `$XDG_RUNTIME_DIR/app/com.artemchep.keyguard/ssh-agent.sock`);
    - **macOS** —
-     `~/Library/Group Containers/com.artemchep.keyguard/ssh-agent.sock`;
+     `~/.keyguard/ssh-agent.sock`;
    - **Windows** — `\\.\pipe\keyguard-ssh-agent`.
 2. Point your SSH tooling at it by setting `SSH_AUTH_SOCK` to Keyguard's
    endpoint — the setup screen offers this as an option. For example, in your
@@ -36,13 +36,26 @@ and **RSA** keys are supported.
    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/keyguard-ssh-agent.sock"
    ```
 
+   On macOS:
+
+   ```sh
+   export SSH_AUTH_SOCK="$HOME/.keyguard/ssh-agent.sock"
+   ```
+
+   Or set the macOS endpoint in `~/.ssh/config`:
+
+   ```sshconfig
+   Host *
+     IdentityAgent "${HOME}/.keyguard/ssh-agent.sock"
+   ```
+
    In PowerShell on Windows:
 
    ```powershell
    $env:SSH_AUTH_SOCK="\\.\pipe\keyguard-ssh-agent"
    ```
 
-   You can also pin it in `~/.ssh/config`:
+   Or set the Windows endpoint in `~/.ssh/config`:
 
    ```sshconfig
    Host *
@@ -63,7 +76,16 @@ For OpenSSH in [Termux](https://termux.dev/), the agent uses a dedicated
 1. Enable the **SSH agent** in Keyguard's settings.
 2. Install Termux, then install the Keyguard SSH agent helper package from
    the custom APT repository (the setup screen walks you through it).
-3. Use `ssh` inside Termux as usual — the helper signals Keyguard, the two
+3. Run this in Termux, and add it to your shell startup file. Each shell exports
+   the socket path and starts or reuses the helper:
+
+   ```sh
+   if [ -x "$PREFIX/bin/keyguard-android-ssh-agent" ]; then
+     eval "$("$PREFIX/bin/keyguard-android-ssh-agent" --ensure -a "$PREFIX/tmp/keyguard-ssh-agent.sock")"
+   fi
+   ```
+
+4. Use `ssh` inside Termux as usual — the helper signals Keyguard, the two
    exchange encrypted messages over a local channel, and Keyguard shows the
    approval dialog.
 
@@ -89,7 +111,7 @@ the Termux helper. Direct Android SSH Authentication API registrations and
 request approvals do not reuse these scopes.
 
 The approval window controls **how long** an approval is remembered. The
-approval scope controls **which verified callers** may reuse it during that
+approval scope controls **which callers** may reuse it during that
 window. Choose a scope in the SSH agent settings:
 
 | Scope | Who can reuse an approval? | Same terminal tab or pane | Different terminal tab or pane |
@@ -103,12 +125,18 @@ Starting a new command normally creates a new process and agent connection, so
 the connection and process scopes usually ask again even in the same terminal
 tab or pane.
 
-The terminal columns describe Linux and macOS when native identity evidence is
+The table describes Linux and macOS when native identity evidence is
 available. With the Termux helper on Android, **Per process** falls back to the
 current connection, while **Application, isolated by terminal session** falls
 back to the verified application because Android does not provide a
-terminal-session identity here. On Windows, every option currently behaves
-like **Per connection**.
+terminal-session identity here.
+
+On Windows, **Per application** is the default. The terminal-isolated scope is
+unavailable; approvals may be shared across tabs in the detected application.
+Process and application detection is best effort. Transferred pipe
+handles and caller-selected parent processes can misidentify the requester;
+these scopes do not reliably isolate malicious apps running under your
+account. Choose **Per connection** for stricter isolation.
 
 ## Reviewing activity
 

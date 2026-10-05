@@ -1,10 +1,8 @@
 package com.artemchep.keyguard.crypto
 
-import com.artemchep.keyguard.util.io.toInputStream
-import com.artemchep.keyguard.util.io.toOutputStream
-import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpDecryptTextResult
-import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpDecryptTextRequest
 import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpClearSignFileRequest
+import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpDecryptTextRequest
+import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpDecryptTextResult
 import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpEncryptFileRequest
 import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpEncryptTextRequest
 import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpExportPublicKeyRequest
@@ -21,6 +19,16 @@ import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpVerificationWarnin
 import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpVerifier
 import com.artemchep.keyguard.common.service.crypto.splitClearTextLines
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
+import com.artemchep.keyguard.util.io.toInputStream
+import com.artemchep.keyguard.util.io.toOutputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.security.SecureRandom
+import java.util.Date
+import kotlin.time.Clock
+import kotlin.time.Instant
 import org.bouncycastle.bcpg.ArmoredOutputStream
 import org.bouncycastle.bcpg.BCPGOutputStream
 import org.bouncycastle.bcpg.HashAlgorithmTags
@@ -35,8 +43,8 @@ import org.bouncycastle.openpgp.PGPLiteralDataGenerator
 import org.bouncycastle.openpgp.PGPOnePassSignatureList
 import org.bouncycastle.openpgp.PGPPrivateKey
 import org.bouncycastle.openpgp.PGPPublicKey
-import org.bouncycastle.openpgp.PGPPublicKeyRing
 import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
+import org.bouncycastle.openpgp.PGPPublicKeyRing
 import org.bouncycastle.openpgp.PGPSecretKey
 import org.bouncycastle.openpgp.PGPSecretKeyRingCollection
 import org.bouncycastle.openpgp.PGPSignature
@@ -51,23 +59,10 @@ import org.bouncycastle.openpgp.operator.jcajce.JcePGPDataEncryptorBuilder
 import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyDataDecryptorFactoryBuilder
 import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyKeyEncryptionMethodGenerator
 import org.bouncycastle.util.io.Streams
-import org.kodein.di.DirectDI
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.io.OutputStream
-import java.security.SecureRandom
-import java.util.Date
-import kotlin.time.Clock
-import kotlin.time.Instant
 
 @Suppress("LargeClass", "TooManyFunctions")
-class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
+class BcGpgOpenPgpServiceTestOracle : GpgOpenPgpService,
     GpgOpenPgpVerifier by NativeGpgOpenPgpVerifier {
-    constructor(
-        directDI: DirectDI,
-    ) : this()
-
     override fun clearSignText(
         request: GpgOpenPgpSignTextRequest,
     ): String {
@@ -235,6 +230,7 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
             .use { it.readBytes().decodeToString(throwOnInvalidSequence = true) }
         val signed = clearSignText(
             GpgOpenPgpSignTextRequest(
+                candidateRevocationKeys = emptyList(),
                 text = text,
                 privateKey = request.privateKey,
             ),
@@ -318,6 +314,10 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
                 .setProvider(gpgBouncyCastleProvider)
                 .setSecureRandom(SecureRandom())
                 .setWithIntegrityPacket(true)
+            if (encryptionKeys.all { it.version == 6 }) {
+                encryptorBuilder.setWithAEAD(org.bouncycastle.bcpg.AEADAlgorithmTags.OCB, 6)
+                    .setUseV6AEAD()
+            }
             val encryptedDataGenerator = PGPEncryptedDataGenerator(encryptorBuilder)
             encryptionKeys.forEach { key ->
                 encryptedDataGenerator.addMethod(
@@ -565,6 +565,7 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
         val generator = PGPSignatureGenerator(
             JcaPGPContentSignerBuilder(secretKey.publicKey.algorithm, HashAlgorithmTags.SHA256)
                 .setProvider(gpgBouncyCastleProvider),
+            secretKey.publicKey,
         )
         generator.init(signatureType, privateKey)
         val userId = secretKey.publicKey.userIDs
@@ -771,8 +772,13 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
             key.authenticated &&
                 (key.publicKey.isMasterKey || key.signingCrossCertified)
         }
+        // A signature that is merely arithmetically correct is not "valid": an expired
+        // data signature or one bound to a collision-prone digest is reported as INVALID
+        // with the warning that says why, never as VALID.
+        val signatureExpired = signature.isExpiredAt(now)
+        val weakDigest = signature.hashAlgorithm in WEAK_DATA_SIGNATURE_DIGESTS
         return GpgOpenPgpVerification(
-            status = if (valid) {
+            status = if (valid && !signatureExpired && !weakDigest) {
                 GpgOpenPgpVerificationStatus.VALID
             } else {
                 GpgOpenPgpVerificationStatus.INVALID
@@ -784,27 +790,38 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
                 ?.verifiedUserIds
                 .orEmpty(),
             createdAt = signature.creationTime?.let { Instant.fromEpochMilliseconds(it.time) },
-            warnings = buildList {
-                if (
-                    signerKey != null &&
-                    (certificate?.primary?.revoked == true || signerKey.revoked)
-                ) {
-                    add(GpgOpenPgpVerificationWarning.KEY_REVOKED)
-                }
-                if (
-                    signerKey != null &&
-                    (
-                        certificate?.primary?.isExpired(now) == true ||
-                            signerKey.isExpired(now)
-                        )
-                ) {
-                    add(GpgOpenPgpVerificationWarning.KEY_EXPIRED)
-                }
-                if (signature.isExpiredAt(now)) {
-                    add(GpgOpenPgpVerificationWarning.SIGNATURE_EXPIRED)
-                }
-            },
+            warnings = verificationWarnings(
+                certificate = certificate,
+                signerKey = signerKey,
+                signatureExpired = signatureExpired,
+                weakDigest = weakDigest,
+                referenceTime = now,
+            ),
         )
+    }
+
+    private fun verificationWarnings(
+        certificate: GpgCertificateInspectorJvm?,
+        signerKey: GpgVerifiedCertificateKeyJvm?,
+        signatureExpired: Boolean,
+        weakDigest: Boolean,
+        referenceTime: Instant,
+    ): List<GpgOpenPgpVerificationWarning> = buildList {
+        if (signerKey != null && (certificate?.primary?.revoked == true || signerKey.revoked)) {
+            add(GpgOpenPgpVerificationWarning.KEY_REVOKED)
+        }
+        if (
+            signerKey != null &&
+            (certificate?.primary?.isExpired(referenceTime) == true || signerKey.isExpired(referenceTime))
+        ) {
+            add(GpgOpenPgpVerificationWarning.KEY_EXPIRED)
+        }
+        if (signatureExpired) {
+            add(GpgOpenPgpVerificationWarning.SIGNATURE_EXPIRED)
+        }
+        if (weakDigest) {
+            add(GpgOpenPgpVerificationWarning.WEAK_DIGEST)
+        }
     }
 
     private fun findInspectedPublicKey(
@@ -866,4 +883,14 @@ class BcGpgOpenPgpServiceTestOracle() : GpgOpenPgpService,
 
 private data class SigningContext(
     val signatureGenerator: PGPSignatureGenerator,
+)
+
+/**
+ * Digest algorithms the verification policy refuses for data signatures. Mirrors the
+ * native core's `weak_data_signature_digest`.
+ */
+internal val WEAK_DATA_SIGNATURE_DIGESTS = setOf(
+    HashAlgorithmTags.MD5,
+    HashAlgorithmTags.SHA1,
+    HashAlgorithmTags.RIPEMD160,
 )

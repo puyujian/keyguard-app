@@ -2,31 +2,31 @@ package com.artemchep.keyguard.common.service.keyboard
 
 import androidx.compose.ui.input.key.KeyEvent
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
-import com.artemchep.keyguard.feature.navigation.keyboard.KeyEventInterceptorRegistration
+import com.artemchep.keyguard.platform.WindowId
 import kotlinx.collections.immutable.persistentMapOf
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 
 class KeyboardShortcutsServiceImpl(
     private val cryptoGenerator: CryptoGenerator,
 ) : KeyboardShortcutsService, KeyboardShortcutsServiceHost {
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        cryptoGenerator = directDI.instance(),
+    private data class Registration(
+        val windowId: WindowId,
+        val block: (KeyEvent) -> Boolean,
     )
 
-    private var registrations = persistentMapOf<String, KeyEventInterceptorRegistration>()
+    private var registrations = persistentMapOf<String, Registration>()
 
-    override fun handle(keyEvent: KeyEvent): Boolean =
-        registrations.any { it.value.block(keyEvent) }
+    override fun handle(windowId: WindowId, keyEvent: KeyEvent): Boolean =
+        registrations.any { (_, registration) ->
+            registration.windowId == windowId && registration.block(keyEvent)
+        }
 
     override fun register(
+        windowId: WindowId,
         block: (KeyEvent) -> Boolean,
     ): () -> Unit {
         val id = cryptoGenerator.uuid()
-        val registration = KeyEventInterceptorRegistration(
-            id = id,
+        val registration = Registration(
+            windowId = windowId,
             block = block,
         )
         registrations = registrations.put(id, registration)

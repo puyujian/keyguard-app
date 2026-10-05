@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import com.artemchep.keyguard.common.service.agent.MAX_AGENT_CALLER_EXECUTABLE_P
 import com.artemchep.keyguard.common.service.agent.MAX_AGENT_CALLER_NAME_LENGTH
 import com.artemchep.keyguard.common.service.agent.completeWithLog
 import com.artemchep.keyguard.common.service.agent.sanitizedAgentDisplayValue
+import com.artemchep.keyguard.common.usecase.GetCiphers
 import com.artemchep.keyguard.feature.dialog.DialogContent
 import com.artemchep.keyguard.feature.home.vault.component.FlatItemLayoutExpressive
 import com.artemchep.keyguard.res.Res
@@ -64,9 +66,11 @@ import com.artemchep.keyguard.ui.text.annotatedResource
 import com.artemchep.keyguard.ui.theme.Dimens
 import com.artemchep.keyguard.ui.theme.combineAlpha
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 
 /**
  * Renders the content for an agent (SSH/GPG) signing approval window.
@@ -75,8 +79,13 @@ import org.jetbrains.compose.resources.stringResource
  * @param title The title resource shown at the top of the dialog.
  * @param messageKnownApp The message resource used when the caller app is known.
  * @param messageUnknownApp The message resource used when the caller app is unknown.
- * @param keyName The display name of the key being used.
+ * @param keyName The display name of the key being used, as known when
+ *   the request was created. A request created while the vault was locked
+ *   only knows the cached name, which may be just the fingerprint.
  * @param keyFingerprint The fingerprint of the key shown in the details.
+ * @param cipherId Identity of the vault entry holding the key, when known;
+ *   once the vault is unlocked the entry's title replaces [keyName].
+ * @param keyIcon The key type shown beside its name and fingerprint.
  * @param onDismiss Called after the request has been resolved (either
  *   approved or denied) so the caller can close the window.
  */
@@ -89,6 +98,8 @@ fun AgentApprovalContent(
     messageUnknownApp: StringResource,
     keyName: String,
     keyFingerprint: String,
+    cipherId: String?,
+    keyIcon: @Composable RowScope.() -> Unit = icon<RowScope>(Icons.Outlined.Terminal, Icons.Outlined.Key),
     onDismiss: () -> Unit,
 ) {
     var showKeyDetails by remember {
@@ -175,12 +186,16 @@ fun AgentApprovalContent(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 FlatItemLayoutExpressive(
-                    leading = icon<RowScope>(Icons.Outlined.Terminal, Icons.Outlined.Key),
+                    leading = keyIcon,
                     content = {
+                        val cipherName = rememberCipherName(
+                            cipherId = cipherId,
+                            initialValue = keyName,
+                        )
                         FlatItemTextContent(
                             title = {
                                 Text(
-                                    text = keyName,
+                                    text = cipherName,
                                 )
                             },
                         )
@@ -274,6 +289,27 @@ fun AgentApprovalContent(
     )
 }
 
+@Composable
+private fun rememberCipherName(
+    cipherId: String?,
+    initialValue: String,
+): String {
+    cipherId
+        ?: return initialValue
+
+    val getCiphers = koinInject<GetCiphers>()
+    val cipherNameFlow = remember(getCiphers, cipherId) {
+        getCiphers()
+            .map { ciphers ->
+                ciphers
+                    .firstOrNull { it.id == cipherId }
+                    ?.name
+            }
+    }
+    return cipherNameFlow.collectAsState(initial = initialValue).value
+        ?: initialValue
+}
+
 internal data class AgentApprovalCallerInfo(
     val primaryLabel: String?,
     val secondaryLabel: String?,
@@ -294,7 +330,7 @@ internal fun buildAgentApprovalCallerInfo(
     val processName = caller.processName
         .sanitizedAgentDisplayValue(MAX_AGENT_CALLER_NAME_LENGTH)
     // Native collectors include an authenticated signing identifier or a
-    // verified instance prefix in appName. Keep that security label primary;
+    // verified get prefix in appName. Keep that security label primary;
     // the OS-resolved friendly name and icon are presentation-only hints.
     val primaryLabel = appName ?: resolvedName ?: appBundlePath ?: processName
     val secondaryLabel = buildSet {

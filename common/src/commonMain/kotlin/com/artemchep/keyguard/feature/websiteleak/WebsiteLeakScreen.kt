@@ -33,16 +33,16 @@ import com.artemchep.keyguard.common.model.Loadable
 import com.artemchep.keyguard.common.model.getOrNull
 import com.artemchep.keyguard.common.usecase.NumberFormatter
 import com.artemchep.keyguard.feature.dialog.Dialog
-import com.artemchep.keyguard.ui.icons.FaviconIcon
 import com.artemchep.keyguard.feature.home.vault.component.Section
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.FlatItem
 import com.artemchep.keyguard.ui.FlatSimpleNote
 import com.artemchep.keyguard.ui.FlatTextFieldBadge
 import com.artemchep.keyguard.ui.HtmlText
 import com.artemchep.keyguard.ui.MediumEmphasisAlpha
 import com.artemchep.keyguard.ui.SimpleNote
+import com.artemchep.keyguard.ui.icons.FaviconIcon
 import com.artemchep.keyguard.ui.icons.icon
 import com.artemchep.keyguard.ui.poweredby.PoweredByHaveibeenpwned
 import com.artemchep.keyguard.ui.skeleton.SkeletonText
@@ -52,7 +52,7 @@ import com.artemchep.keyguard.ui.theme.infoContainer
 import com.artemchep.keyguard.ui.util.HorizontalDivider
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.compose.rememberInstance
+import org.koin.compose.koinInject
 
 @Composable
 fun WebsiteLeakScreen(
@@ -64,14 +64,14 @@ fun WebsiteLeakScreen(
     Dialog(
         icon = icon(Icons.AutoMirrored.Outlined.FactCheck),
         title = {
-            Text(stringResource(Res.string.emailleak_title))
+            Text(stringResource(Res.string.websiteleak_title))
         },
         content = {
             Column {
                 Text(
                     modifier = Modifier
                         .padding(horizontal = Dimens.horizontalPadding),
-                    text = stringResource(Res.string.emailleak_note),
+                    text = stringResource(Res.string.websiteleak_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = LocalContentColor.current
                         .combineAlpha(MediumEmphasisAlpha),
@@ -144,19 +144,27 @@ private fun ColumnScope.ContentSkeleton() {
 private fun ColumnScope.Content(
     state: WebsiteLeakState,
 ) {
-    val leaks = state.content.breaches
+    val leaks = state.content.getOrNull()?.breaches
+    if (leaks == null) {
+        FlatSimpleNote(
+            type = SimpleNote.Type.WARNING,
+            text = stringResource(Res.string.emailleak_failed_to_load_status_text),
+        )
+        return
+    }
+
     if (leaks.isNotEmpty()) {
         FlatSimpleNote(
             type = SimpleNote.Type.WARNING,
-            title = stringResource(Res.string.emailleak_breach_found_title),
+            title = stringResource(Res.string.websiteleak_breach_found_title),
         )
         Section(
-            text = stringResource(Res.string.emailleak_breach_section),
+            text = stringResource(Res.string.websiteleak_breach_section),
         )
     } else {
         FlatSimpleNote(
             type = SimpleNote.Type.OK,
-            title = stringResource(Res.string.emailleak_breach_not_found_title),
+            title = stringResource(Res.string.websiteleak_breach_not_found_title),
         )
     }
     leaks.forEachIndexed { index, item ->
@@ -231,7 +239,7 @@ private fun BreachItem(
         }
         Column {
             if (item.count != null) {
-                val numberFormatter: NumberFormatter by rememberInstance()
+                val numberFormatter: NumberFormatter = koinInject()
                 Text(
                     text = pluralStringResource(
                         Res.plurals.emailleak_breach_accounts_count_plural,
@@ -245,7 +253,7 @@ private fun BreachItem(
             if (item.occurredAt != null) {
                 Text(
                     text = stringResource(
-                        Res.string.emailleak_breach_occurred_at,
+                        Res.string.websiteleak_breach_occurred_at,
                         item.occurredAt,
                     ),
                     style = MaterialTheme.typography.labelSmall,
@@ -256,7 +264,7 @@ private fun BreachItem(
             if (item.reportedAt != null) {
                 Text(
                     text = stringResource(
-                        Res.string.emailleak_breach_reported_at,
+                        Res.string.websiteleak_breach_reported_at,
                         item.reportedAt,
                     ),
                     style = MaterialTheme.typography.labelSmall,

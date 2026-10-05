@@ -1,7 +1,6 @@
 package com.artemchep.keyguard.feature.home.settings.component
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -14,24 +13,24 @@ import com.artemchep.keyguard.common.usecase.PutGpgAgent
 import com.artemchep.keyguard.common.usecase.WindowCoroutineScope
 import com.artemchep.keyguard.feature.home.settings.LocalSettingPaneComponents
 import com.artemchep.keyguard.platform.Platform
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.DisabledEmphasisAlpha
+import com.artemchep.keyguard.ui.icons.KeyguardGpgKey
 import com.artemchep.keyguard.ui.theme.combineAlpha
 import com.artemchep.keyguard.ui.theme.info
 import com.artemchep.keyguard.ui.theme.ok
 import kotlinx.coroutines.flow.combine
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
+import org.koin.core.scope.Scope
 
 fun settingGpgAgentProvider(
-    directDI: DirectDI,
+    koinScope: Scope,
 ) = settingGpgAgentProvider(
-    getGpgAgent = directDI.instance(),
-    getGpgAgentStatus = directDI.instance(),
-    putGpgAgent = directDI.instance(),
-    windowCoroutineScope = directDI.instance(),
+    getGpgAgent = koinScope.get(),
+    getGpgAgentStatus = koinScope.get(),
+    putGpgAgent = koinScope.get(),
+    windowCoroutineScope = koinScope.get(),
 )
 
 fun settingGpgAgentProvider(
@@ -83,7 +82,7 @@ private fun SettingGpgAgent(
     onCheckedChange: ((Boolean) -> Unit)?,
 ) {
     LocalSettingPaneComponents.current.KgSwitch(
-        icon = Icons.Outlined.Key,
+        icon = Icons.Outlined.KeyguardGpgKey,
         title = {
             Text(
                 text = stringResource(Res.string.pref_item_gpg_agent_title),

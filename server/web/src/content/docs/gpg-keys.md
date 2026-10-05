@@ -7,13 +7,14 @@ order: 10
 
 Keyguard stores OpenPGP keys in a dedicated **GPG key** item type and can use
 them to sign, verify, encrypt, and decrypt. This page is a technical reference
-for what Keyguard actually parses, stores, and supports. For the day-to-day
+for what Keyguard parses, stores, and supports. For daily
 setup see the [GPG agent setup](/docs/gpg-agent/) guide.
 
 OpenPGP (the standard behind GnuPG/PGP, defined by RFC 4880 and the newer RFC
 9580) describes a **certificate** — colloquially "a public key" — as a primary
-key plus zero or more subkeys, one or more user IDs, and metadata bound
-together by self-signatures.
+key plus zero or more subkeys, user IDs, and metadata bound together by
+self-signatures. Keyguard supports **v4** and **v6** certificates. V6 certificates
+can have no user IDs; a Direct Key self-signature carries their key-wide policy.
 
 A GPG key item itself stores three things:
 
@@ -31,13 +32,12 @@ exact convention.
 
 ## Identifiers
 
-Keyguard derives and displays three identifiers per key, all matching what
-GnuPG shows:
+Keyguard derives and displays three identifiers per key:
 
 | Identifier | What it is | Format in Keyguard |
 | --- | --- | --- |
-| **Fingerprint** | Hash over the public key material and creation time; identifies the whole certificate | Upper-case hex, grouped in fours |
-| **Key ID** | The low 64 bits of the fingerprint (the "long" key ID) | 16 upper-case hex digits |
+| **Fingerprint** | Hash over the public key material and creation time; identifies the whole certificate | 40 hex digits for v4, 64 for v6; upper-case, grouped in fours |
+| **Key ID** | The low 64 bits of a v4 fingerprint, or the high 64 bits of a v6 fingerprint | 16 upper-case hex digits |
 | **Keygrip** | libgcrypt's hash of the raw public parameters; used to address a key inside the agent | Upper-case hex, byte-identical to `gpg --with-keygrip` |
 
 ## Capabilities
@@ -62,6 +62,11 @@ addresses are pulled out for display, with a fallback for bare-email user IDs.
 **Creation** and **expiration** dates are read from the key's self-signature,
 and **revoked** keys and subkeys are marked as such.
 
+Expiration changes and identity replacement or revocation work with both
+versions. V6 identity edits preserve the key-wide policy in the Direct Key
+self-signature. You can revoke the last identity on a v6 certificate; v4
+certificates must retain an active identity.
+
 ## Algorithms
 
 Keyguard recognises the following public-key algorithms when parsing a key
@@ -78,9 +83,9 @@ Keyguard recognises the following public-key algorithms when parsing a key
 | X25519 / X448 | RFC 9580 native encryption |
 | Ed448 | RFC 9580 native signing |
 
-Any other algorithm is shown generically. Note that being able to *parse* a key
-does not mean every operation supports it — see the limits under
-[GPG agent](#operations-with-the-gpg-agent) below.
+Any other algorithm is shown generically. Algorithm support varies by
+operation; see [GPG agent](#operations-with-the-gpg-agent) below for
+operational limits.
 
 ## Generating a key
 
@@ -94,12 +99,17 @@ produces and the current limitations.
 The add-item flow accepts existing keys in either **ASCII-armored** or **binary**
 form, and both **public** and **private** key material:
 
-- A **public key** is parsed and stored as-is.
+- A **public key** is parsed and stored as a certificate.
 - A **private key** is parsed; if it is passphrase-protected, Keyguard prompts
   for the passphrase, then stores it unencrypted (see the note above). A wrong
   passphrase is reported as such.
 
-Malformed input, empty input, and unsupported formats are reported distinctly.
+When importing into an item that already contains the same certificate, Keyguard
+combines its certificate data. Existing secret material, certifications, and
+revocations are retained. A different certificate or malformed material is
+rejected without changing the item.
+
+Empty input and unsupported formats are reported distinctly.
 
 ## Exporting and copying
 
@@ -128,7 +138,7 @@ warnings when the signing key is **revoked** or **expired**, or when the
 
 ## Using GPG keys from other tools
 
-On desktop Linux, macOS, and Windows, Keyguard can act as a drop-in
+On desktop Linux, macOS, and Windows, Keyguard can act as a compatible
 **gpg-agent** so that a local `gpg` (for example, when signing Git commits) uses
 keys from your vault. On Android, compatible apps can use Keyguard as an
 OpenKeychain-compatible OpenPGP provider for signing, verification, encryption,
@@ -146,16 +156,20 @@ supported:
 | **VKS** (verifying keyserver, keys.openpgp.org API) | `https://keys.openpgp.org` | Fingerprint, key ID, or email |
 | **HKP** (HTTP Keyserver Protocol) | `https://keyserver.ubuntu.com` | Fingerprint, key ID, email, or free text |
 
-keys.openpgp.org is a **verifying** keyserver: it serves key material freely by
-fingerprint, but only distributes the identity (email) information after the
-address owner confirms it, and it does not do free-text search — Keyguard picks
-the right lookup automatically and can fall back to HKP for free-text queries.
-Email lookups against VKS are rate-limited.
+Lookups accept both v4 and v6 fingerprints. The selected keyserver must support
+the certificate's version to store and return it.
+
+keys.openpgp.org is a **verifying** keyserver: it serves key material by
+fingerprint and distributes email identities only after owner confirmation.
+Keyguard automatically queries VKS by fingerprint or email, and falls back to
+HKP for free-text queries. Email lookups against VKS are rate-limited.
 
 You can:
 
 - **search** a keyserver and import a result;
-- **upload** a public key to publish it;
+- **upload** a public key to publish it; on a VKS keyserver you can pick the
+  e-mail addresses that receive a verification e-mail, which makes the key
+  searchable by those addresses once confirmed;
 - **verify** a stored public key against the keyserver, recording whether it is
   *found & verified*, *found but unverified*, *not found*, or *revoked*.
 

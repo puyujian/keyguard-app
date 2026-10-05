@@ -3,6 +3,7 @@ package com.artemchep.keyguard.feature.home.settings.component
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import com.artemchep.keyguard.URL_GITHUB
 import com.artemchep.keyguard.common.usecase.GetVersionLog
 import com.artemchep.keyguard.feature.home.settings.KgAction
 import com.artemchep.keyguard.feature.home.settings.LocalSettingPaneComponents
@@ -10,18 +11,17 @@ import com.artemchep.keyguard.feature.navigation.LocalNavigationController
 import com.artemchep.keyguard.feature.navigation.NavigationIntent
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.platform.util.hasBrowser
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.ui.icons.ChevronIcon
 import kotlinx.coroutines.flow.map
 import org.jetbrains.compose.resources.stringResource
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
+import org.koin.core.scope.Scope
 
 fun settingAboutAppChangelogProvider(
-    directDI: DirectDI,
+    koinScope: Scope,
 ) = settingAboutAppChangelogProvider(
-    getVersionLog = directDI.instance(),
+    getVersionLog = koinScope.get(),
 )
 
 fun settingAboutAppChangelogProvider(
@@ -78,7 +78,7 @@ private fun SettingAboutAppChangelog(
             {
                 val intent = run {
                     val url =
-                        "https://github.com/AChep/keyguard-app/compare/$oldRef...$newRef"
+                        "$URL_GITHUB/compare/$oldRef...$newRef"
                     NavigationIntent.NavigateToBrowser(url)
                 }
                 controller.queue(intent)

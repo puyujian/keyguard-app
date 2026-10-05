@@ -16,6 +16,14 @@ on:
       - 'commonAgent/**'
       - 'desktopGpgAgent/**'
       - 'integration/gpgE2eTest/**'
+      - 'appleApp/src/**/gpgagent/**'
+      - 'appleApp/src/appleMain/kotlin/com/artemchep/keyguard/apple/KeyguardCore.kt'
+      - 'appleApp/src/macosMain/kotlin/com/artemchep/keyguard/MacosAppModule.kt'
+      - 'appleUi/Sources/KeyguardUI/Apple/GPGAgent/**'
+      - 'appleUi/Sources/KeyguardUI/Bridge/GPGAgent/**'
+      - 'appleUi/Sources/KeyguardUI/Screens/GpgAgent*'
+      - 'macosApp/project.yml'
+      - 'macosApp/macosApp/KeyguardGpgAgent.entitlements'
       - 'common/src/**/gpgagent/**'
       - 'common/src/**/service/agent/**'
       - 'common/src/**/*Gpg*'
@@ -33,6 +41,14 @@ on:
       - 'commonAgent/**'
       - 'desktopGpgAgent/**'
       - 'integration/gpgE2eTest/**'
+      - 'appleApp/src/**/gpgagent/**'
+      - 'appleApp/src/appleMain/kotlin/com/artemchep/keyguard/apple/KeyguardCore.kt'
+      - 'appleApp/src/macosMain/kotlin/com/artemchep/keyguard/MacosAppModule.kt'
+      - 'appleUi/Sources/KeyguardUI/Apple/GPGAgent/**'
+      - 'appleUi/Sources/KeyguardUI/Bridge/GPGAgent/**'
+      - 'appleUi/Sources/KeyguardUI/Screens/GpgAgent*'
+      - 'macosApp/project.yml'
+      - 'macosApp/macosApp/KeyguardGpgAgent.entitlements'
       - 'common/src/**/gpgagent/**'
       - 'common/src/**/service/agent/**'
       - 'common/src/**/*Gpg*'
@@ -57,7 +73,7 @@ jobs:
       - name: "Setup Rust toolchain"
         uses: ./.github/actions/setup_rust
         with:
-          components: "clippy"
+          components: "clippy,rustfmt"
       - uses: ./.github/actions/setup_protobuf
       - name: "Run Rust static analysis"
         run: |
@@ -68,27 +84,6 @@ jobs:
         run: cargo test --manifest-path commonGpgAgent/Cargo.toml
       - name: "Test desktopGpgAgent crate"
         run: cargo test --manifest-path desktopGpgAgent/src/Cargo.toml
-
-  gpg-kotlin-tests:
-    name: "Kotlin agent tests"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup_gradle
-        with:
-          cache-write-only: ${{ inputs.cache-write-only || false }}
-      - name: "Setup Rust toolchain"
-        uses: ./.github/actions/setup_rust
-        with:
-          targets: "x86_64-unknown-linux-gnu"
-      - name: "Run GPG agent unit tests"
-        run: >-
-          ./gradlew :common:desktopTest
-          --tests "com.artemchep.keyguard.common.service.gpgagent.*"
-          --tests "com.artemchep.keyguard.common.service.crypto.Gpg*"
-          --tests "com.artemchep.keyguard.crypto.OpenPgpMutationAndAgentBouncyCastleDifferentialTest"
 
   gpg-e2e-tests:
     name: "End-to-end (${{ matrix.os }})"
@@ -116,12 +111,16 @@ jobs:
       - name: "Setup Rust toolchain"
         uses: ./.github/actions/setup_rust
         with:
-          components: "clippy"
+          components: "clippy,rustfmt"
       - uses: ./.github/actions/setup_protobuf
       - name: "Run platform Rust static analysis"
         run: |
           cargo clippy --manifest-path commonAgent/Cargo.toml --all-targets --locked -- -D clippy::undocumented_unsafe_blocks
           cargo clippy --manifest-path desktopGpgAgent/src/Cargo.toml --all-targets --locked -- -D clippy::undocumented_unsafe_blocks
+      - name: "Test shared caller identity on this platform"
+        run: cargo test --manifest-path commonAgent/Cargo.toml --all-targets --locked
+      - name: "Test desktop GPG agent on this platform"
+        run: cargo test --manifest-path desktopGpgAgent/src/Cargo.toml --all-targets --locked
       - uses: ./.github/actions/setup_gpg
       - name: "Run GPG end-to-end tests"
         run: ${{ matrix.gradle }} :integration:gpgE2eTest:gpgE2eTest

@@ -13,13 +13,111 @@
 #include <string.h>
 #include <math.h>
 
-typedef void (*kg_biometrics_callback_t)(bool success, const char *error);
+typedef void (*kg_biometrics_callback_t)(int32_t status, const char *error);
 typedef void (*kg_hotkey_callback_t)(int32_t hotkey_id);
+typedef void (*kg_power_callback_t)(int32_t event);
+
+// Mirrors `REGISTER_STATUS_INTERNAL_ERROR` in `ffi.rs`.
+static const int32_t KGNativeInternalError = -5;
+
+static void kg_run_on_main(void (^block)(void)) {
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
+
+@interface KGPowerObserver : NSObject
+@property(nonatomic, assign) kg_power_callback_t callback;
+@property(nonatomic, strong) NSMutableArray<id> *tokens;
+@end
+
+@implementation KGPowerObserver
+@end
+
+static NSMutableDictionary<NSNumber *, KGPowerObserver *> *kg_power_registry(void) {
+    static NSMutableDictionary<NSNumber *, KGPowerObserver *> *registry;
+    static dispatch_once_t once_token;
+    dispatch_once(&once_token, ^{
+        registry = [[NSMutableDictionary alloc] init];
+    });
+    return registry;
+}
+
+static int32_t kg_power_next_id = 1;
+
+int32_t kg_register_native_power_events(kg_power_callback_t callback) {
+    if (callback == NULL) {
+        return KGNativeInternalError;
+    }
+    __block int32_t result = KGNativeInternalError;
+    kg_run_on_main(^{
+        KGPowerObserver *entry = [[KGPowerObserver alloc] init];
+        entry.callback = callback;
+        entry.tokens = [[NSMutableArray alloc] init];
+        NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+        // Matches DesktopPowerEvent in the JVM bridge. Use synchronous
+        // delivery: the will-sleep notification must wait for the lock.
+        NSArray<NSNotificationName> *names = @[
+            NSWorkspaceScreensDidSleepNotification,
+            NSWorkspaceScreensDidWakeNotification,
+            NSWorkspaceWillSleepNotification,
+            NSWorkspaceDidWakeNotification,
+        ];
+        for (NSUInteger index = 0; index < names.count; index++) {
+            const int32_t event = (int32_t)index + 1;
+            id token = [center addObserverForName:names[index]
+                                          object:nil
+                                           queue:nil
+                                      usingBlock:^(NSNotification *_note) {
+                (void)_note;
+                kg_run_on_main(^{
+                    if (entry.callback != NULL) {
+                        entry.callback(event);
+                    }
+                });
+            }];
+            [entry.tokens addObject:token];
+        }
+        const int32_t registration_id = kg_power_next_id++;
+        kg_power_registry()[@(registration_id)] = entry;
+        result = registration_id;
+    });
+    return result;
+}
+
+bool kg_unregister_native_power_events(int32_t registration_id) {
+    __block bool result = false;
+    kg_run_on_main(^{
+        NSNumber *key = @(registration_id);
+        KGPowerObserver *entry = kg_power_registry()[key];
+        if (entry == nil) {
+            return;
+        }
+        entry.callback = NULL;
+        NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+        for (id token in entry.tokens) {
+            [center removeObserver:token];
+        }
+        [entry.tokens removeAllObjects];
+        [kg_power_registry() removeObjectForKey:key];
+        result = true;
+    });
+    return result;
+}
 
 static NSString *const KGAccountName = @"com.artemchep.keyguard";
+
+// Mirrors `ChallengeStatus` in `biometrics.rs`.
+static const int32_t KGBiometricsStatusSuccess = 0;
+static const int32_t KGBiometricsStatusUserCanceled = 1;
+static const int32_t KGBiometricsStatusSecurityDeviceLocked = 3;
+static const int32_t KGBiometricsStatusUnavailable = 4;
+static const int32_t KGBiometricsStatusUserPrefersPassword = 5;
+static const int32_t KGBiometricsStatusUnknown = 6;
 static const OSType KGHotKeySignature = 'KGHK';
 static const int32_t KGHotKeyUnavailable = -4;
-static const int32_t KGHotKeyInternalError = -5;
 
 @interface KGHotKeyEntry : NSObject
 @property(nonatomic, assign) EventHotKeyRef ref;
@@ -86,11 +184,7 @@ int32_t kg_get_system_accent_color(void) {
         result = (int32_t)argb;
     };
 
-    if ([NSThread isMainThread]) {
-        block();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
-    }
+    kg_run_on_main(block);
 
     return result;
 }
@@ -196,11 +290,11 @@ static int32_t kg_register_global_hotkey_inner(
         kg_hotkey_callback_t callback
 ) {
     if (callback == NULL) {
-        return KGHotKeyInternalError;
+        return KGNativeInternalError;
     }
 
     if (!kg_install_hotkey_handler()) {
-        return KGHotKeyInternalError;
+        return KGNativeInternalError;
     }
 
     const int32_t hotkey_id = kg_hotkey_next_id++;
@@ -252,7 +346,7 @@ int32_t kg_register_native_global_hotkey(
         uint32_t native_modifiers,
         kg_hotkey_callback_t callback
 ) {
-    __block int32_t result = KGHotKeyInternalError;
+    __block int32_t result = KGNativeInternalError;
     void (^block)(void) = ^{
         result = kg_register_global_hotkey_inner(
                 native_key_code,
@@ -261,11 +355,7 @@ int32_t kg_register_native_global_hotkey(
         );
     };
 
-    if ([NSThread isMainThread]) {
-        block();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
-    }
+    kg_run_on_main(block);
 
     return result;
 }
@@ -276,11 +366,7 @@ bool kg_unregister_native_global_hotkey(int32_t hotkey_id) {
         result = kg_unregister_global_hotkey_inner(hotkey_id);
     };
 
-    if ([NSThread isMainThread]) {
-        block();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
-    }
+    kg_run_on_main(block);
 
     return result;
 }
@@ -303,6 +389,29 @@ bool kg_biometrics_is_supported(void) {
     return [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:&error];
 }
 
+static int32_t kg_biometrics_status_from_error(NSError *error) {
+    if (error == nil || ![error.domain isEqualToString:LAErrorDomain]) {
+        return KGBiometricsStatusUnknown;
+    }
+
+    switch (error.code) {
+        case LAErrorUserCancel:
+        case LAErrorSystemCancel:
+        case LAErrorAppCancel:
+            return KGBiometricsStatusUserCanceled;
+        case LAErrorUserFallback:
+            return KGBiometricsStatusUserPrefersPassword;
+        case LAErrorBiometryLockout:
+            return KGBiometricsStatusSecurityDeviceLocked;
+        case LAErrorBiometryNotAvailable:
+        case LAErrorBiometryNotEnrolled:
+        case LAErrorPasscodeNotSet:
+            return KGBiometricsStatusUnavailable;
+        default:
+            return KGBiometricsStatusUnknown;
+    }
+}
+
 void kg_biometrics_verify(const char *title, kg_biometrics_callback_t callback) {
     if (callback == NULL) {
         return;
@@ -312,13 +421,14 @@ void kg_biometrics_verify(const char *title, kg_biometrics_callback_t callback) 
     NSError *error = nil;
     BOOL is_supported = [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:&error];
     if (!is_supported) {
-        callback(false, NULL);
+        NSString *message = error.localizedDescription ?: @"Biometrics are unavailable";
+        callback(kg_biometrics_status_from_error(error), message.UTF8String);
         return;
     }
 
     NSString *localized_reason = kg_string_from_utf8(title);
     if (localized_reason == nil) {
-        callback(false, "Authentication failed");
+        callback(KGBiometricsStatusUnknown, "Authentication failed");
         return;
     }
 
@@ -326,12 +436,12 @@ void kg_biometrics_verify(const char *title, kg_biometrics_callback_t callback) 
             localizedReason:localized_reason
                       reply:^(BOOL success, NSError *reply_error) {
         if (success) {
-            callback(true, NULL);
+            callback(KGBiometricsStatusSuccess, NULL);
             return;
         }
 
         NSString *message = reply_error.localizedDescription ?: @"Authentication failed";
-        callback(false, message.UTF8String);
+        callback(kg_biometrics_status_from_error(reply_error), message.UTF8String);
     }];
 }
 

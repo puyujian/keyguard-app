@@ -3,6 +3,7 @@
 import argparse
 import base64
 import difflib
+import gzip
 import json
 import pathlib
 import re
@@ -323,10 +324,18 @@ def add_binaries(kp):
     if kp.version >= (4, 0):
         first_id = kp.add_binary(first, protected=True)
         second_id = kp.add_binary(second, protected=False)
+        gzip_file = gzip.compress(first, mtime=0)
     else:
         first_id = kp.add_binary(first, compressed=True)
         second_id = kp.add_binary(second, compressed=False)
-    return first_id, second_id
+        # F1 regression: identical stored bytes have different meanings depending
+        # on Compressed. Reuse the exact gzip stream written by PyKeePass.
+        compressed = kp._xpath(
+            f'/KeePassFile/Meta/Binaries/Binary[@ID="{first_id}"]', first=True
+        )
+        gzip_file = base64.b64decode(compressed.text)
+    gzip_id = kp.add_binary(gzip_file, compressed=False, protected=False)
+    return first_id, second_id, gzip_id
 
 
 def add_entries(kp, general, templates, binary_ids):
@@ -354,6 +363,7 @@ def add_entries(kp, general, templates, binary_ids):
     set_auto_type(main)
     main.add_attachment(binary_ids[0], "binary-<&>.dat")
     main.add_attachment(binary_ids[1], "unicode-🔑.txt")
+    main.add_attachment(binary_ids[2], "binary-<&>.dat.gz")
     main.save_history()
 
     main.title = "Current & <Title> 🔑"
@@ -804,10 +814,22 @@ def validate_corpus(manifest):
         raise ValueError(f"Expected 6 groups, found {len(groups)}")
     if len(entries) != 3:
         raise ValueError(f"Expected 3 current entries, found {len(entries)}")
-    if len(manifest["binaries"]) != 2 or len(main["binaries"]) != 2:
-        raise ValueError("Expected two global binaries and two main-entry attachments")
+    if len(manifest["binaries"]) != 3 or len(main["binaries"]) != 3:
+        raise ValueError("Expected three global binaries and three main-entry attachments")
     if len(main["history"]) != 1:
         raise ValueError("Expected one history entry")
+    expected_content = b"attachment-one\x00\xff\n" + bytes(range(16))
+    for entry in (main, main["history"][0]):
+        attachments = {
+            item["name"]: base64.b64decode(
+                manifest["binaries"][item["binaryIndex"]]["contentBase64"]
+            )
+            for item in entry["binaries"]
+        }
+        content = attachments["binary-<&>.dat"]
+        gzip_file = attachments["binary-<&>.dat.gz"]
+        if content != expected_content or gzip_file == content or gzip.decompress(gzip_file) != content:
+            raise ValueError("Compressed attachment and raw gzip file were not preserved separately")
     if not {"Password", "Custom Protected"}.issubset(protected_fields):
         raise ValueError(f"Protected fields are incomplete: {sorted(protected_fields)}")
     if not manifest["documentExtensions"] or not main["extensions"]:
@@ -869,6 +891,8 @@ def command_generate(args):
         args.keyfile.parent.mkdir(parents=True, exist_ok=True)
         args.keyfile.write_bytes(KEYFILE_BYTES)
         keyfile = str(args.keyfile)
+    if args.password is None and keyfile is None:
+        raise SystemExit("Either --password or --keyfile is required")
     kp.password = args.password
     kp.keyfile = keyfile
     kp.credchange_date = BASE_TIME + timedelta(seconds=4)
@@ -909,14 +933,14 @@ def build_parser():
     generate.add_argument("--seed", type=pathlib.Path, required=True)
     generate.add_argument("--database", type=pathlib.Path, required=True)
     generate.add_argument("--manifest", type=pathlib.Path, required=True)
-    generate.add_argument("--password", required=True)
+    generate.add_argument("--password", help="Omit for a key-file-only database")
     generate.add_argument("--keyfile", type=pathlib.Path)
     generate.set_defaults(handler=command_generate)
 
     verify = commands.add_parser("verify", help="Verify a KDBX database against a manifest")
     verify.add_argument("--database", type=pathlib.Path, required=True)
     verify.add_argument("--manifest", type=pathlib.Path, required=True)
-    verify.add_argument("--password", required=True)
+    verify.add_argument("--password", help="Omit for a key-file-only database")
     verify.add_argument("--keyfile", type=pathlib.Path)
     verify.set_defaults(handler=command_verify)
     return parser

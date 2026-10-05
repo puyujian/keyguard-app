@@ -7,6 +7,9 @@ import com.artemchep.keyguard.common.service.crypto.GpgKeyExpirationResult
 import com.artemchep.keyguard.common.service.crypto.GpgKeyExpirationService
 import com.artemchep.keyguard.common.service.crypto.GpgKeyMetadataResolver
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
+import java.util.Date
+import kotlin.time.Clock
+import kotlin.time.Instant
 import org.bouncycastle.bcpg.HashAlgorithmTags
 import org.bouncycastle.bcpg.SignatureSubpacketTags
 import org.bouncycastle.bcpg.SymmetricKeyAlgorithmTags
@@ -20,11 +23,6 @@ import org.bouncycastle.openpgp.PGPSignature
 import org.bouncycastle.openpgp.PGPSignatureGenerator
 import org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPContentSignerBuilder
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import java.util.Date
-import kotlin.time.Clock
-import kotlin.time.Instant
 
 class GpgKeyExpirationServiceJvm(
     private val metadataResolver: GpgKeyMetadataResolver = NativeGpgKeyMetadataResolver,
@@ -36,12 +34,6 @@ class GpgKeyExpirationServiceJvm(
     private val renewalPolicy = GpgRenewalPolicyJvm(
         now = now,
         waitForClock = waitForClock,
-    )
-
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        metadataResolver = directDI.instance(),
     )
 
     override fun update(
@@ -215,33 +207,18 @@ class GpgKeyExpirationServiceJvm(
             fail(GpgKeyExpirationError.SignatureVerificationFailed)
         }
 
-        val secretComponentFingerprints = reparsedSecret.keyRings
-            .asSequence()
-            .single()
-            .secretKeys
-            .asSequence()
-            .map { it.publicKey.fingerprintHex().normalizeGpgFingerprint() }
-            .toSet()
         val resolvedMetadata = metadataResolver.resolve(
             privateKeyArmored = privateKeyArmored,
             publicKeyArmored = publicKeyArmored,
             fingerprint = canonicalPrimaryFingerprint,
             candidateRevocationKeys = request.candidateRevocationKeys,
         ) ?: fail(GpgKeyExpirationError.MetadataResolutionFailed)
-        // A transferable secret key may contain extra public subkeys learned from
-        // a refreshed certificate. They must remain in both armored outputs, but
-        // they must not be advertised to gpg-agent as usable secret components.
-        val metadata = resolvedMetadata.copy(
-            keys = resolvedMetadata.keys.filter { key ->
-                key.fingerprint.normalizeGpgFingerprint() in secretComponentFingerprints
-            },
-        )
         return GpgKeyExpirationResult.Success(
             key = request.key.copy(
                 privateKeyArmored = privateKeyArmored,
                 publicKeyArmored = publicKeyArmored,
                 fingerprint = canonicalPrimaryFingerprint,
-                metadata = metadata,
+                metadata = resolvedMetadata.metadata,
             ),
         )
     }

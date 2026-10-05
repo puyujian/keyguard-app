@@ -50,6 +50,12 @@ private fun findLibBinaryFile(): File {
     throw IllegalStateException(errorMessage)
 }
 
+/** Loads the packaged bridge and resolves an export without accessing platform services. */
+public fun ensureDesktopLibAvailable() {
+    // free(NULL) is a no-op on every platform.
+    DesktopLibJna.get().freePointer(Pointer(0))
+}
+
 public interface DesktopLibJna : Library {
     public companion object {
         @Volatile
@@ -72,6 +78,16 @@ public interface DesktopLibJna : Library {
 
     public fun autoType(payload: Pointer): Boolean
 
+    // Power notifications
+
+    public fun registerNativePowerEvents(callback: PowerEventCallback): Int
+
+    public fun unregisterNativePowerEvents(id: Int): Boolean
+
+    public interface PowerEventCallback : Callback {
+        public fun invoke(event: Int)
+    }
+
     // System accent color
 
     public fun getSystemAccentColor(): Int
@@ -81,14 +97,42 @@ public interface DesktopLibJna : Library {
     public fun biometricsIsSupported(): Boolean
 
     public fun biometricsVerify(
+        windowHandle: Long,
         title: Pointer,
         callback: BiometricsVerifyCallback,
     )
 
+    public fun biometricsPrepareEnrollment(
+        callback: BiometricsVerifyCallback,
+    )
+
+    public fun biometricsDeleteCredential(): Int
+
+    public fun biometricsTransformSecret(
+        windowHandle: Long,
+        title: Pointer,
+        input: Pointer,
+        inputLength: Long,
+        decrypt: Int,
+        callback: BiometricsResultCallback,
+    ): Int
+
     public interface BiometricsVerifyCallback : Callback {
-        public fun invoke(success: Boolean, error: Pointer?)
+        /**
+         * @param status one of the `BiometricsStatus` codes, `0` on success.
+         * @param error optional message, only valid during the callback.
+         */
+        public fun invoke(status: Int, error: Pointer?)
     }
 
+    public interface BiometricsResultCallback : Callback {
+        public fun invoke(
+            status: Int,
+            result: Pointer?,
+            resultLength: Long,
+            error: Pointer?,
+        )
+    }
 
     // Keychain
 

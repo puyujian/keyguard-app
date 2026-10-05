@@ -11,8 +11,10 @@ import com.artemchep.keyguard.feature.navigation.RouteResultTransmitter
 import com.artemchep.keyguard.feature.navigation.state.RememberStateFlowScope
 import com.artemchep.keyguard.feature.navigation.state.navigatePopSelf
 import com.artemchep.keyguard.feature.navigation.state.produceScreenState
-import com.artemchep.keyguard.res.Res
 import com.artemchep.keyguard.res.*
+import com.artemchep.keyguard.res.Res
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.datetime.DateTimeUnit
@@ -20,21 +22,17 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
-import org.kodein.di.compose.localDI
-import org.kodein.di.direct
-import org.kodein.di.instance
-import kotlin.time.Clock
-import kotlin.time.Instant
+import org.koin.compose.currentKoinScope
 
 @Composable
 fun gpgKeyExpirationState(
     args: GpgKeyExpirationRoute.Args,
     transmitter: RouteResultTransmitter<GpgKeyExpirationChange>,
-): GpgKeyExpirationState = with(localDI().direct) {
+): GpgKeyExpirationState = with(currentKoinScope()) {
     gpgKeyExpirationState(
         args = args,
         transmitter = transmitter,
-        dateFormatter = instance(),
+        dateFormatter = get(),
     )
 }
 
@@ -103,13 +101,21 @@ internal suspend fun RememberStateFlowScope.gpgKeyExpirationStateProducer(
                     add(translate(Res.string.gpg_key_expiry_capability_encrypt))
                 }
             }.joinToString().ifEmpty { subKey.algorithm }
+            val description = translate(
+                Res.string.gpg_key_expiry_subkey_capabilities,
+                capabilities,
+                formatSubKeyExpiration(subKey.expiresAt),
+            )
+            // A subkey bound only by a weak-hash template carries no
+            // capabilities, so say why it is still worth selecting.
+            val hint = if (subKey.authenticated) {
+                ""
+            } else {
+                "\n" + translate(Res.string.gpg_key_expiry_subkey_weak_self_signature)
+            }
             put(
                 subKey.fingerprint,
-                translate(
-                    Res.string.gpg_key_expiry_subkey_capabilities,
-                    capabilities,
-                    formatSubKeyExpiration(subKey.expiresAt),
-                ),
+                description + hint,
             )
         }
     }

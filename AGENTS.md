@@ -1,60 +1,117 @@
-# AGENTS.md
+# Keyguard
 
-## Purpose & Boundaries
+Keyguard is a multi-platform password manager that maintains a local encrypted vault
+and syncs it with other platforms: Bitwarden, KeePass (KDBX).
 
-- Optimize for safe, incremental, reviewable changes.
-- Keep edits tightly scoped to the user request. Avoid opportunistic refactors.
-- Prefer shared changes in `:common` when behavior should be consistent across Android and Desktop.
-- Treat `androidApp`, `desktopApp`, and release/deployment config as higher-risk surfaces; only touch them when required.
-- Preserve existing architecture and naming patterns inside each feature area.
+## Structure
 
-## Environment Baseline
+The app is written using Kotlin Multiplatform + Compose Multiplatform + native Rust modules. We are using Gradle as the build system.
 
-- Use JDK `21` to match CI setup defaults.
-- Assume Kotlin Multiplatform + Compose Multiplatform project conventions.
-- Do not assume Android emulator/device availability unless explicitly requested by the user.
+Kotlin is preferred for implementing common features. If a feature requires a large platform-dependent surface, then a native Rust module is preferred. For small one-function cases we can use Kotlin's `actual`/`expect`.
 
-## High-Level Architecture Overview
+_Rust is preferred over use of JNA for new code._
 
-- Platform entrypoints bootstrap DI and platform services:
-  - Android app bootstrap: `androidApp/src/main/java/com/artemchep/keyguard/Main.kt`
-  - Desktop app bootstrap: `desktopApp/src/jvmMain/kotlin/com/artemchep/keyguard/Main.kt`
-- Feature implementation primarily lives in `common/src/commonMain/kotlin/com/artemchep/keyguard/feature/*`.
+### Modules
+
+Main modules for different platforms:
+- `androidApp/` native target for Android;
+- `wearApp/` native target for Wear OS;
+- `desktopApp/` JVM target for desktop platforms: Linux, Windows and macOS;
+- `iosApp/` native target for iOS;
+- `macosApp/` native target for macOS.
+
+Apple specific modules: `appleApp/` the Kotlin bridge both Apple apps run on, and the producer of `KeyguardShared.xcframework`; `appleUi/` is the shared SwiftUI layer and `appleAutofill/` the shared AutoFill extension sources; `xcode/` is the shared Xcode infrastructure.
+
+The shared-module split is incremental:
+- `standard/presentation/` contains full-app state producers without Compose dependencies;
+- `feature/*/` contain the optional features.
+
+New pure presentation modules must not depend on `common/` or application modules,
+even transitively. During migration, adapters in `common/` or optional UI modules connect
+pure producers to the existing screen lifecycle, persisted fields, navigation, and localized resources.
+Apply `keyguard.compose-free` to enforce this boundary.
+
+Utility modules each implement a library we wish existed; the modules are independent and granular.
+The exception is `util/ffi/`, the shared native-bridge leaf.
+
+Integration modules implement projects that are useful for testing Keyguard. For example,
+it's a good idea to put a test implementation of Android Credential provider app that we
+can later use to test the Keyguard's own implementation.
+
+Server modules implement companion projects for Keyguard, such as a website for documentation or
+the implementation of the license server.
+
+## Development
+
+Optimize for safe, incremental, reviewable changes. Keep edits tightly scoped to the user request, avoid feature creeping. Simpler solutions are usually better. Code re-use is important. Preserve existing architecture and naming patterns inside each feature area.
+
+### Check every surface
+
+The most common defect is a change that works on the path you tested and is missing everywhere else.
+Before starting the work, here's a minimal list to keep in mind:
+
+- **Platforms.** Features usually target all platforms, unless specified otherwise. A change should not accidentally break any other platform.
+- **Environments.** Platforms might also have multiple environments. For example the Linux Flatpak build might need specific handling of the Flatpak sandbox. The CI/CD environment might lack some tools this machine has.
+- **Localization.** Do not hardcode strings. Do not overly avoid plurals. Use placeholders when needed.
+- **Docs.** The documentation at `server/web/` should stay up to date. Do not automatically add new sections or pages, unless specifically asked to do so. Only automatically fix the now outdated info.
+- **Delivery.** Changes in the build process usually affect CI/CD scripts.
+
+### Lint checks
+
+Run the checks relevant to the changed language:
+
+- **Kotlin:** `./gradlew detekt` for static analysis, and `./gradlew detektCustomRules` for Keyguard-specific rules;
+- **Rust:** Run `cargo fmt --all -- --check` and Clippy for the affected crate or workspace;
+- **Swift:** `xcode/scripts/lint-swift.sh` runs strict `swift format` checks; add `--fix` to format sources.
+
+Run the checks relevant to the changed platform:
+
+- **Android:** `./gradlew lint` for Android Lint.
+
+### Localization
+
+We only edit the base translations directly in the repo, as the localization of the app is managed
+by a Crowdin localization platform.
+
+### Documentation
+
+We have a website at `server/web/` that hosts documentation relevant to a user of Keyguard. The Keyguard's users are technical and do not want to read overly verbose text:
+- Say what it does, not how it feels.
+- Shorten or split dense sentences. Less is better.
+- Cut adverbs, or use a stronger verb.
+- Prefer simpler terms.
+
+### High-level architecture
+
+#### Dependency injection
+
+Platform entrypoints bootstrap DI and platform services:
+
+- Android app bootstrap: `androidApp/src/main/java/com/artemchep/keyguard/Main.kt`
+- Desktop app bootstrap: `desktopApp/src/jvmMain/kotlin/com/artemchep/keyguard/Main.kt`
+- there are also common shared DI entrypoints.
+
+We use Koin with the compiler plugin. Apply `keyguard.koin` to modules that own DI wiring, group definitions into explicit modules per domain, and prefer the compiler DSL for constructor injection. Keep domain and presentation constructors free of Koin; resolve dependencies at composition boundaries. Vault-scoped definitions live in a typed scope that is created on unlock and closed on lock.
+
+Keep module holders as `val module = module { ... }` referenced directly from `modules(...)`/`includes(...)`, avoid runtime module loading and blanket `@Provided`, and treat `KOIN-W003` as a failed build. Only compiling an application root validates the full graph; the iOS root is covered by `IosKoinGraphTest` instead.
+
+#### Navigation + screens
+
 - Navigation is route-driven (`Route`, `NavigationIntent`, `NavigationNode`) and hosts screen content in a stack-based router.
 - Screen state is usually produced via `produceScreenState(...)`, which connects a feature state flow to navigation lifecycle and persisted screen state.
 - `RememberScreenStateFlow` and `RememberStateFlowScopeImpl` provide:
-  - lifecycle-aware flow sharing,
-  - persisted screen fields (in-memory + disk-backed),
-  - scoped side effects (navigation, messaging, background actions).
+    - lifecycle-aware flow sharing,
+    - persisted screen fields (in-memory + disk-backed),
+    - scoped side effects (navigation, messaging, background actions).
 
-## Example: Screen + State + State Producer
-
-Feedback feature reference files:
+For reference, here are the files for the **feedback feature**:
 
 - Screen: `common/src/commonMain/kotlin/com/artemchep/keyguard/feature/feedback/FeedbackScreen.kt`
 - State: `common/src/commonMain/kotlin/com/artemchep/keyguard/feature/feedback/FeedbackState.kt`
 - State producer: `common/src/commonMain/kotlin/com/artemchep/keyguard/feature/feedback/FeedbackStateProducer.kt`
-
-How they work together:
-
-1. `FeedbackScreen()` calls `produceFeedbackScreenState()` and renders a `Loadable<FeedbackState>`.
-2. `produceFeedbackScreenState()` uses `produceScreenState(key = "feedback", initial = Loadable.Loading)`.
-3. Inside the producer, `mutablePersistedFlow("message", ...)` creates persisted input state for the message field.
-4. The producer validates input, creates UI callbacks (`onSendClick`, `onClear`), and maps domain/navigation actions into `FeedbackState`.
-5. The screen is mostly a pure renderer: it binds UI widgets to `FeedbackState` and executes callbacks from state.
 
 Practical rule: for new screens, follow the same split:
 
 - `XxxScreen.kt` for rendering,
 - `XxxState.kt` for UI contract,
 - `XxxStateProducer.kt` for state composition, persistence, and side effects.
-
-## Change-Safety Rules
-
-- Do not modify signing, notarization, release packaging, or deployment workflow files unless explicitly requested.
-- Do not change build flavor/build type behavior (`playStore`/`none`, release variants) unless required by the task.
-- Avoid cross-module moves/renames in first-pass changes; prefer local modifications.
-- In handoff notes, always state:
-  - which modules were changed,
-  - behavior impact,
-  - any unverified risk due to not running platform-specific tests.

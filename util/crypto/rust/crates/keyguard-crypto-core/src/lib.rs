@@ -7,11 +7,7 @@
 mod argon2_compat;
 pub mod fast;
 mod legacy_pem;
-mod openpgp_agent;
-mod openpgp_mutation;
-mod openpgp_packets;
-mod openpgp_read;
-mod openpgp_write;
+mod openpgp;
 mod padding;
 mod passkeys;
 mod pkcs8_pbes2;
@@ -36,7 +32,7 @@ use sessions::SessionError;
 /// Native function ABI version.
 pub const ABI_VERSION: u32 = 1;
 /// Protobuf request/response protocol version.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Maximum encoded request or response envelope size (16 MiB).
 pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum raw streaming update size (64 KiB).
@@ -62,7 +58,7 @@ pub const CAPABILITY_STREAMING: u64 = 1 << 7;
 pub const CAPABILITY_KDBX_ARGON2: u64 = 1 << 8;
 /// Stateless Salsa20/ChaCha20 offset transform capability bit.
 pub const CAPABILITY_STREAM_CIPHER_XOR_AT_OFFSET: u64 = 1 << 9;
-/// Twofish-CBC-PKCS#7 one-shot and streaming capability bit.
+/// Twofish-CBC-PKCS#7 streaming capability bit.
 pub const CAPABILITY_TWOFISH_CBC_PKCS7: u64 = 1 << 10;
 /// RSA-OAEP SHA-1/SHA-256 encryption and decryption capability bit.
 pub const CAPABILITY_RSA_OAEP: u64 = 1 << 11;
@@ -98,6 +94,21 @@ pub const CAPABILITY_SSH_CXF_EXPORT: u64 = 1 << 25;
 pub const CAPABILITY_SSH_PUBLIC_KEY_DECODE: u64 = 1 << 26;
 /// Streaming cleartext OpenPGP signature verification and body recovery.
 pub const CAPABILITY_OPENPGP_CLEAR_VERIFY: u64 = 1 << 27;
+/// External designated-revoker policy is enforced for OpenPGP private operations.
+pub const CAPABILITY_OPENPGP_EXTERNAL_REVOCATION_POLICY: u64 = 1 << 28;
+/// V4 signed User ID revocation with minimal transferable artifacts.
+pub const CAPABILITY_OPENPGP_SIGNED_REVOCATION: u64 = 1 << 29;
+/// Atomic V4 textual User ID replacement with a combined certificate artifact.
+pub const CAPABILITY_OPENPGP_USER_ID_REPLACEMENT: u64 = 1 << 30;
+// Bit 31 belonged to the retired V1 certificate material reconciliation; do not reuse it.
+/// OpenPGP reconciliation with separate local and transferable material outputs.
+pub const CAPABILITY_OPENPGP_CERTIFICATE_MATERIAL_RECONCILE_V2: u64 = 1 << 32;
+/// Per-User-ID certification evaluation against explicit local trust roots.
+pub const CAPABILITY_OPENPGP_USER_ID_CERTIFICATION: u64 = 1 << 33;
+/// Bounded EOF/output draining for OpenPGP decryption sessions.
+pub const CAPABILITY_OPENPGP_STREAM_DRAIN: u64 = 1 << 34;
+/// V4 and V6 OpenPGP generation and certificate mutations.
+pub const CAPABILITY_OPENPGP_V6_GENERATION_MUTATION: u64 = 1 << 35;
 /// Complete capability set provided by this native library revision.
 pub const CAPABILITIES: u64 = CAPABILITY_HKDF_SHA256
     | CAPABILITY_PBKDF2_SHA256
@@ -126,7 +137,14 @@ pub const CAPABILITIES: u64 = CAPABILITY_HKDF_SHA256
     | CAPABILITY_PASSKEYS
     | CAPABILITY_SSH_CXF_EXPORT
     | CAPABILITY_SSH_PUBLIC_KEY_DECODE
-    | CAPABILITY_OPENPGP_CLEAR_VERIFY;
+    | CAPABILITY_OPENPGP_CLEAR_VERIFY
+    | CAPABILITY_OPENPGP_EXTERNAL_REVOCATION_POLICY
+    | CAPABILITY_OPENPGP_SIGNED_REVOCATION
+    | CAPABILITY_OPENPGP_USER_ID_REPLACEMENT
+    | CAPABILITY_OPENPGP_CERTIFICATE_MATERIAL_RECONCILE_V2
+    | CAPABILITY_OPENPGP_USER_ID_CERTIFICATION
+    | CAPABILITY_OPENPGP_STREAM_DRAIN
+    | CAPABILITY_OPENPGP_V6_GENERATION_MUTATION;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -158,6 +176,14 @@ pub fn call(request_bytes: &[u8]) -> Vec<u8> {
         None => return error_response("", NativeErrorCode::InvalidRequest),
     };
     let operation_name = one_shot_operation_name(&operation);
+    if let native_request::Operation::OpenPgpStreamDrain(request) = operation {
+        return match sessions::drain_openpgp(request.handle) {
+            Ok(output) => {
+                success_response(operation_name, native_response::Result::BytesValue(output))
+            }
+            Err(error) => error_response(operation_name, session_error_code(error)),
+        };
+    }
     match execute_one_shot(operation) {
         Ok(result) => success_response(operation_name, result),
         Err(error) => error_response(operation_name, primitive_error_code(error)),
@@ -183,10 +209,6 @@ pub fn stream_open(request_bytes: &[u8]) -> Vec<u8> {
     };
     let operation_name = stream_open_operation_name(&operation);
     match operation {
-        native_stream_open_request::Operation::HmacSha256(mut request) => {
-            let key = std::mem::take(&mut request.key);
-            stream_open_response(operation_name, sessions::open_hmac_sha256(key))
-        }
         native_stream_open_request::Operation::Digest(request) => {
             let algorithm = match parse_hash_algorithm(request.algorithm) {
                 Ok(algorithm) => algorithm,
@@ -261,27 +283,31 @@ pub fn stream_open(request_bytes: &[u8]) -> Vec<u8> {
         native_stream_open_request::Operation::OpenPgpDetachedVerify(request) => {
             stream_open_response(
                 operation_name,
-                sessions::open_openpgp_detached_verify(request),
+                sessions::open_openpgp(openpgp::adapter::OpenPgpSession::detached_verify(request)),
             )
         }
         native_stream_open_request::Operation::OpenPgpDetachedSign(request) => {
             stream_open_response(
                 operation_name,
-                sessions::open_openpgp_detached_sign(request),
+                sessions::open_openpgp(openpgp::adapter::OpenPgpSession::detached_sign(request)),
             )
         }
-        native_stream_open_request::Operation::OpenPgpClearSign(request) => {
-            stream_open_response(operation_name, sessions::open_openpgp_clear_sign(request))
-        }
-        native_stream_open_request::Operation::OpenPgpClearVerify(request) => {
-            stream_open_response(operation_name, sessions::open_openpgp_clear_verify(request))
-        }
-        native_stream_open_request::Operation::OpenPgpEncrypt(request) => {
-            stream_open_response(operation_name, sessions::open_openpgp_encrypt(request))
-        }
-        native_stream_open_request::Operation::OpenPgpDecrypt(request) => {
-            stream_open_response(operation_name, sessions::open_openpgp_decrypt(request))
-        }
+        native_stream_open_request::Operation::OpenPgpClearSign(request) => stream_open_response(
+            operation_name,
+            sessions::open_openpgp(openpgp::adapter::OpenPgpSession::clear_sign(request)),
+        ),
+        native_stream_open_request::Operation::OpenPgpClearVerify(request) => stream_open_response(
+            operation_name,
+            sessions::open_openpgp(openpgp::adapter::OpenPgpSession::clear_verify(request)),
+        ),
+        native_stream_open_request::Operation::OpenPgpEncrypt(request) => stream_open_response(
+            operation_name,
+            sessions::open_openpgp(openpgp::adapter::OpenPgpSession::encrypt(request)),
+        ),
+        native_stream_open_request::Operation::OpenPgpDecrypt(request) => stream_open_response(
+            operation_name,
+            sessions::open_openpgp(openpgp::adapter::OpenPgpSession::decrypt(request)),
+        ),
     }
 }
 
@@ -379,15 +405,6 @@ fn execute_one_shot(
         native_request::Operation::RandomBytes(request) => {
             primitives::random_bytes(request.length)?
         }
-        native_request::Operation::RandomInt(request) => {
-            return primitives::random_int(request.bounded, request.exclusive_upper_bound)
-                .map(native_response::Result::Int32Value);
-        }
-        native_request::Operation::RandomInts(request) => primitives::random_ints(
-            request.bounded,
-            request.exclusive_upper_bound,
-            request.count,
-        )?,
         native_request::Operation::Hmac(mut request) => {
             let algorithm = parse_hash_algorithm(request.algorithm)?;
             let key = std::mem::take(&mut request.key);
@@ -450,13 +467,6 @@ fn execute_one_shot(
             let data = std::mem::take(&mut request.data);
             primitives::stream_cipher_xor_at_offset(algorithm, key, nonce, request.offset, data)?
         }
-        native_request::Operation::TwofishCbcPkcs7(mut request) => {
-            let direction = parse_cipher_direction(request.direction)?;
-            let key = std::mem::take(&mut request.key);
-            let iv = std::mem::take(&mut request.iv);
-            let data = std::mem::take(&mut request.data);
-            primitives::twofish_cbc_pkcs7(direction, key, iv, data)?
-        }
         native_request::Operation::RsaOaepEncrypt(mut request) => {
             let hash = parse_rsa_oaep_hash(request.hash)?;
             let public_key_spki = std::mem::take(&mut request.public_key_spki);
@@ -497,12 +507,6 @@ fn execute_one_shot(
             let bits = ssh_keys::private_key_rsa_bits(std::mem::take(&mut request.private_key));
             return Ok(native_response::Result::Int32Value(bits));
         }
-        native_request::Operation::SshPrivateKeyFormat(mut request) => {
-            ssh_keys::format_private_key(
-                parse_ssh_key_type(request.r#type)?,
-                std::mem::take(&mut request.private_key),
-            )?
-        }
         native_request::Operation::SshAgentSign(mut request) => ssh_keys::sign(
             std::mem::take(&mut request.private_key_pem),
             std::mem::take(&mut request.public_key_openssh),
@@ -532,37 +536,45 @@ fn execute_one_shot(
             std::mem::take(&mut request.data),
         )?,
         native_request::Operation::OpenPgpPublicKeyParse(request) => {
-            openpgp_read::parse_public_key_request(request).map_err(openpgp_read_error)?
+            openpgp::adapter::parse_public_key(request)?
         }
-        native_request::Operation::OpenPgpVerify(request) => {
-            openpgp_read::verify_request(request).map_err(openpgp_read_error)?
-        }
+        native_request::Operation::OpenPgpVerify(request) => openpgp::adapter::verify(request)?,
         native_request::Operation::OpenPgpMetadataResolve(request) => {
-            openpgp_read::resolve_metadata(request).map_err(openpgp_read_error)?
+            openpgp::adapter::resolve_metadata(request)?
+        }
+        native_request::Operation::OpenPgpUserIdCertificationEvaluate(request) => {
+            openpgp::adapter::evaluate_user_id_certifications(request)?
         }
         native_request::Operation::OpenPgpKeyGenerate(request) => {
-            openpgp_write::generate_key_request(request).map_err(openpgp_write_error)?
+            openpgp::adapter::generate_key(request)?
         }
         native_request::Operation::OpenPgpKeyImport(request) => {
-            openpgp_write::import_key_request(request).map_err(openpgp_write_error)?
+            openpgp::adapter::import_key(request)?
         }
-        native_request::Operation::OpenPgpSign(request) => {
-            openpgp_write::sign_request(request).map_err(openpgp_write_error)?
-        }
-        native_request::Operation::OpenPgpEncrypt(request) => {
-            openpgp_write::encrypt_request(request).map_err(openpgp_write_error)?
-        }
-        native_request::Operation::OpenPgpDecrypt(request) => {
-            openpgp_write::decrypt_request(request).map_err(openpgp_write_error)?
+        native_request::Operation::OpenPgpSign(request) => openpgp::adapter::sign(request)?,
+        native_request::Operation::OpenPgpEncrypt(request) => openpgp::adapter::encrypt(request)?,
+        native_request::Operation::OpenPgpDecrypt(request) => openpgp::adapter::decrypt(request)?,
+        // Session operations are dispatched by call() to preserve InvalidSession.
+        native_request::Operation::OpenPgpStreamDrain(_) => {
+            return Err(PrimitiveError::InvalidArgument);
         }
         native_request::Operation::OpenPgpExpirationUpdate(request) => {
-            openpgp_mutation::update_expiration_request(request).map_err(openpgp_mutation_error)?
+            openpgp::adapter::update_expiration(request)?
+        }
+        native_request::Operation::OpenPgpCertificateMaterialReconcileV2(request) => {
+            openpgp::adapter::reconcile_certificate_material_v2(request)?
+        }
+        native_request::Operation::OpenPgpUserIdRevocation(request) => {
+            openpgp::adapter::revoke_user_id(request)?
+        }
+        native_request::Operation::OpenPgpUserIdReplacement(request) => {
+            openpgp::adapter::replace_user_id(request)?
         }
         native_request::Operation::OpenPgpAgentSign(request) => {
-            openpgp_agent::sign_request(request).map_err(openpgp_agent_error)?
+            openpgp::adapter::agent_sign(request)?
         }
         native_request::Operation::OpenPgpAgentDecrypt(request) => {
-            openpgp_agent::decrypt_request(request).map_err(openpgp_agent_error)?
+            openpgp::adapter::agent_decrypt(request)?
         }
     };
     Ok(native_response::Result::BytesValue(result))
@@ -574,8 +586,6 @@ fn one_shot_operation_name(operation: &native_request::Operation) -> &'static st
         native_request::Operation::Pbkdf2Sha256(_) => "pbkdf2_sha256",
         native_request::Operation::Argon2(_) => "argon2",
         native_request::Operation::RandomBytes(_) => "random_bytes",
-        native_request::Operation::RandomInt(_) => "random_int",
-        native_request::Operation::RandomInts(_) => "random_ints",
         native_request::Operation::Hmac(_) => "hmac",
         native_request::Operation::Digest(_) => "digest",
         native_request::Operation::AesEcbNoPaddingEncrypt(_) => "aes_ecb_no_padding_encrypt",
@@ -588,7 +598,6 @@ fn one_shot_operation_name(operation: &native_request::Operation) -> &'static st
         }
         native_request::Operation::AesEcbNoPaddingTransform(_) => "aes_ecb_no_padding_transform",
         native_request::Operation::StreamCipherXorAtOffset(_) => "stream_cipher_xor_at_offset",
-        native_request::Operation::TwofishCbcPkcs7(_) => "twofish_cbc_pkcs7",
         native_request::Operation::RsaOaepEncrypt(_) => "rsa_oaep_encrypt",
         native_request::Operation::RsaOaepDecrypt(_) => "rsa_oaep_decrypt",
         native_request::Operation::RsaPkcs8ToSpki(_) => "rsa_pkcs8_to_spki",
@@ -599,7 +608,6 @@ fn one_shot_operation_name(operation: &native_request::Operation) -> &'static st
         native_request::Operation::SshKeyParse(_) => "ssh_key_parse",
         native_request::Operation::SshKeyDescribe(_) => "ssh_key_describe",
         native_request::Operation::SshPrivateKeyRsaBits(_) => "ssh_private_key_rsa_bits",
-        native_request::Operation::SshPrivateKeyFormat(_) => "ssh_private_key_format",
         native_request::Operation::SshAgentSign(_) => "ssh_agent_sign",
         native_request::Operation::SshPrivateKeyImport(_) => "ssh_private_key_import",
         native_request::Operation::SshKeyExportCxf(_) => "ssh_key_export_cxf",
@@ -610,12 +618,21 @@ fn one_shot_operation_name(operation: &native_request::Operation) -> &'static st
         native_request::Operation::OpenPgpPublicKeyParse(_) => "open_pgp_public_key_parse",
         native_request::Operation::OpenPgpVerify(_) => "open_pgp_verify",
         native_request::Operation::OpenPgpMetadataResolve(_) => "open_pgp_metadata_resolve",
+        native_request::Operation::OpenPgpUserIdCertificationEvaluate(_) => {
+            "open_pgp_user_id_certification_evaluate"
+        }
         native_request::Operation::OpenPgpKeyGenerate(_) => "open_pgp_key_generate",
         native_request::Operation::OpenPgpKeyImport(_) => "open_pgp_key_import",
         native_request::Operation::OpenPgpSign(_) => "open_pgp_sign",
         native_request::Operation::OpenPgpEncrypt(_) => "open_pgp_encrypt",
         native_request::Operation::OpenPgpDecrypt(_) => "open_pgp_decrypt",
+        native_request::Operation::OpenPgpStreamDrain(_) => "open_pgp_stream_drain",
         native_request::Operation::OpenPgpExpirationUpdate(_) => "open_pgp_expiration_update",
+        native_request::Operation::OpenPgpCertificateMaterialReconcileV2(_) => {
+            "open_pgp_certificate_material_reconcile_v2"
+        }
+        native_request::Operation::OpenPgpUserIdRevocation(_) => "open_pgp_user_id_revocation",
+        native_request::Operation::OpenPgpUserIdReplacement(_) => "open_pgp_user_id_replacement",
         native_request::Operation::OpenPgpAgentSign(_) => "open_pgp_agent_sign",
         native_request::Operation::OpenPgpAgentDecrypt(_) => "open_pgp_agent_decrypt",
     }
@@ -623,7 +640,6 @@ fn one_shot_operation_name(operation: &native_request::Operation) -> &'static st
 
 fn stream_open_operation_name(operation: &native_stream_open_request::Operation) -> &'static str {
     match operation {
-        native_stream_open_request::Operation::HmacSha256(_) => "hmac_sha256.stream_open",
         native_stream_open_request::Operation::Digest(_) => "digest.stream_open",
         native_stream_open_request::Operation::Hmac(_) => "hmac.stream_open",
         native_stream_open_request::Operation::AesCbcPkcs7(_) => "aes_cbc_pkcs7.stream_open",
@@ -708,46 +724,6 @@ fn parse_cipher_direction(value: i32) -> Result<CipherDirection, PrimitiveError>
         .ok()
         .filter(|direction| *direction != CipherDirection::Unspecified)
         .ok_or(PrimitiveError::InvalidArgument)
-}
-
-fn openpgp_read_error(error: openpgp_read::OpenPgpReadError) -> PrimitiveError {
-    match error {
-        openpgp_read::OpenPgpReadError::InvalidArgument => PrimitiveError::InvalidArgument,
-        openpgp_read::OpenPgpReadError::ResourceLimit => PrimitiveError::ResourceLimit,
-        openpgp_read::OpenPgpReadError::Internal => PrimitiveError::CryptoFailure,
-    }
-}
-
-fn openpgp_write_error(error: openpgp_write::OpenPgpWriteError) -> PrimitiveError {
-    match error {
-        openpgp_write::OpenPgpWriteError::InvalidArgument => PrimitiveError::InvalidArgument,
-        openpgp_write::OpenPgpWriteError::MissingKey => PrimitiveError::NoUsableKey,
-        openpgp_write::OpenPgpWriteError::UnsupportedKeyVersion(_) => {
-            PrimitiveError::UnsupportedKeyVersion
-        }
-        openpgp_write::OpenPgpWriteError::AuthenticationFailed => {
-            PrimitiveError::AuthenticationFailed
-        }
-        openpgp_write::OpenPgpWriteError::ResourceLimit => PrimitiveError::ResourceLimit,
-        openpgp_write::OpenPgpWriteError::CryptoFailure => PrimitiveError::CryptoFailure,
-        openpgp_write::OpenPgpWriteError::Internal => PrimitiveError::Internal,
-        openpgp_write::OpenPgpWriteError::Panic => PrimitiveError::Panic,
-    }
-}
-
-fn openpgp_mutation_error(error: openpgp_mutation::OpenPgpMutationFatal) -> PrimitiveError {
-    match error {
-        openpgp_mutation::OpenPgpMutationFatal::ResourceLimit => PrimitiveError::ResourceLimit,
-    }
-}
-
-fn openpgp_agent_error(error: openpgp_agent::OpenPgpAgentError) -> PrimitiveError {
-    match error {
-        openpgp_agent::OpenPgpAgentError::InvalidArgument => PrimitiveError::InvalidArgument,
-        openpgp_agent::OpenPgpAgentError::ResourceLimit => PrimitiveError::ResourceLimit,
-        openpgp_agent::OpenPgpAgentError::CryptoFailure => PrimitiveError::CryptoFailure,
-        openpgp_agent::OpenPgpAgentError::Internal => PrimitiveError::Internal,
-    }
 }
 
 fn primitive_error_code(error: PrimitiveError) -> NativeErrorCode {
@@ -837,14 +813,15 @@ mod tests {
         AesCbcPkcs7HmacSha256EncryptStreamOpenRequest, AesCbcPkcs7Request,
         AesCbcPkcs7StreamOpenRequest, AesEcbNoPaddingEncryptRequest,
         AesEcbNoPaddingTransformRequest, Argon2Request, DigestRequest, DigestStreamOpenRequest,
-        HkdfSha256Request, HmacRequest, HmacSha256StreamOpenRequest, HmacStreamOpenRequest,
-        NativeStreamOpenRequest, OpenPgpDetachedVerifyStreamOpenRequest,
-        OpenPgpMetadataResolveRequest, OpenPgpVerifyKind, OpenPgpVerifyRequest,
-        Pbkdf2Sha256Request, RandomBytesRequest, RandomIntRequest, RandomIntsRequest,
-        RsaOaepDecryptRequest, RsaOaepEncryptRequest, RsaPkcs8ToSpkiRequest, SshAgentSignRequest,
-        SshAgentTcpChaCha20Poly1305Request, SshKeyDescribeRequest, SshKeyGenerateRequest,
-        SshKeyMaterial, SshKeyParseRequest, SshKeyType, SshPrivateKeyFormatRequest,
-        SshPrivateKeyImportRequest, StreamCipherXorAtOffsetRequest, TwofishCbcPkcs7Request,
+        HkdfSha256Request, HmacRequest, HmacStreamOpenRequest, NativeStreamOpenRequest,
+        OpenPgpCertificateMaterialReconcileV2Request, OpenPgpCertificateMaterialReconcileV2Success,
+        OpenPgpDetachedVerifyStreamOpenRequest, OpenPgpMetadataResolveRequest,
+        OpenPgpPublicKeyParseRequest, OpenPgpUserIdReplacementRequest,
+        OpenPgpUserIdRevocationRequest, OpenPgpVerifyKind, OpenPgpVerifyRequest,
+        Pbkdf2Sha256Request, RandomBytesRequest, RsaOaepDecryptRequest, RsaOaepEncryptRequest,
+        RsaPkcs8ToSpkiRequest, SshAgentSignRequest, SshAgentTcpChaCha20Poly1305Request,
+        SshKeyDescribeRequest, SshKeyGenerateRequest, SshKeyMaterial, SshKeyParseRequest,
+        SshKeyType, SshPrivateKeyImportRequest, StreamCipherXorAtOffsetRequest,
         TwofishCbcPkcs7StreamOpenRequest,
     };
 
@@ -859,9 +836,10 @@ mod tests {
 
     #[test]
     fn no_usable_openpgp_key_has_distinct_wire_code() {
-        let error = openpgp_write_error(openpgp_write::OpenPgpWriteError::MissingKey);
-
-        assert_eq!(primitive_error_code(error), NativeErrorCode::NoUsableKey);
+        assert_eq!(
+            primitive_error_code(PrimitiveError::NoUsableKey),
+            NativeErrorCode::NoUsableKey
+        );
         assert_eq!(
             session_error_code(SessionError::NoUsableKey),
             NativeErrorCode::NoUsableKey
@@ -882,6 +860,53 @@ mod tests {
         protocol::reset_zeroized_secret_request_drops();
         let response = NativeResponse::decode(call(&unsupported).as_slice())
             .expect("unsupported-protocol response must decode");
+        assert_eq!(
+            response.status.map(|status| status.code),
+            Some(NativeErrorCode::UnsupportedProtocol as i32)
+        );
+        assert_eq!(protocol::zeroized_secret_request_drops(), 1);
+
+        let unsupported_replacement = NativeRequest {
+            protocol_version: PROTOCOL_VERSION + 1,
+            operation: Some(native_request::Operation::OpenPgpUserIdReplacement(
+                OpenPgpUserIdReplacementRequest {
+                    private_key: b"unsupported-replacement-private-key".to_vec(),
+                    public_key: b"unsupported-replacement-public-key".to_vec(),
+                    expected_primary_fingerprint: "00".to_owned(),
+                    old_identity_id: "v1:00".to_owned(),
+                    new_user_id: "new@example.test".to_owned(),
+                    candidate_revocation_keys: Vec::new(),
+                    reference_time_epoch_seconds: 1,
+                },
+            )),
+        }
+        .encode_to_vec();
+        protocol::reset_zeroized_secret_request_drops();
+        let response = NativeResponse::decode(call(&unsupported_replacement).as_slice())
+            .expect("unsupported replacement response must decode");
+        assert_eq!(
+            response.status.map(|status| status.code),
+            Some(NativeErrorCode::UnsupportedProtocol as i32)
+        );
+        assert_eq!(protocol::zeroized_secret_request_drops(), 1);
+
+        let unsupported_revocation = NativeRequest {
+            protocol_version: PROTOCOL_VERSION + 1,
+            operation: Some(native_request::Operation::OpenPgpUserIdRevocation(
+                OpenPgpUserIdRevocationRequest {
+                    private_key: b"unsupported-revocation-private-key".to_vec(),
+                    public_key: b"unsupported-revocation-public-key".to_vec(),
+                    expected_primary_fingerprint: "00".to_owned(),
+                    identity_id: "v1:00".to_owned(),
+                    candidate_revocation_keys: Vec::new(),
+                    reference_time_epoch_seconds: 1,
+                },
+            )),
+        }
+        .encode_to_vec();
+        protocol::reset_zeroized_secret_request_drops();
+        let response = NativeResponse::decode(call(&unsupported_revocation).as_slice())
+            .expect("unsupported revocation response must decode");
         assert_eq!(
             response.status.map(|status| status.code),
             Some(NativeErrorCode::UnsupportedProtocol as i32)
@@ -947,6 +972,57 @@ mod tests {
     }
 
     #[test]
+    fn decoded_openpgp_parse_request_zeroizes_on_unsupported_protocol() {
+        let unsupported = NativeRequest {
+            protocol_version: PROTOCOL_VERSION + 1,
+            operation: Some(native_request::Operation::OpenPgpPublicKeyParse(
+                OpenPgpPublicKeyParseRequest {
+                    key_data: b"unsupported-protocol-secret-certificate".to_vec(),
+                    reference_time_epoch_seconds: None,
+                },
+            )),
+        }
+        .encode_to_vec();
+
+        protocol::reset_zeroized_secret_request_drops();
+        let response = NativeResponse::decode(call(&unsupported).as_slice())
+            .expect("unsupported-protocol response must decode");
+        assert_eq!(
+            response.status.map(|status| status.code),
+            Some(NativeErrorCode::UnsupportedProtocol as i32),
+        );
+        assert_eq!(protocol::zeroized_secret_request_drops(), 1);
+    }
+
+    #[test]
+    fn decoded_certificate_material_v2_request_zeroizes_on_unsupported_protocol() {
+        let unsupported = NativeRequest {
+            protocol_version: PROTOCOL_VERSION + 1,
+            operation: Some(
+                native_request::Operation::OpenPgpCertificateMaterialReconcileV2(
+                    OpenPgpCertificateMaterialReconcileV2Request {
+                        expected_primary_fingerprint: "00".repeat(20),
+                        existing_public_certificate: None,
+                        incoming_public_certificate: None,
+                        existing_secret_certificate: Some(b"unsupported-v2-secret".to_vec()),
+                        incoming_secret_certificate: Some(b"second-v2-secret".to_vec()),
+                    },
+                ),
+            ),
+        }
+        .encode_to_vec();
+
+        protocol::reset_zeroized_secret_request_drops();
+        let response = NativeResponse::decode(call(&unsupported).as_slice())
+            .expect("unsupported-protocol response must decode");
+        assert_eq!(
+            response.status.map(|status| status.code),
+            Some(NativeErrorCode::UnsupportedProtocol as i32),
+        );
+        assert_eq!(protocol::zeroized_secret_request_drops(), 1);
+    }
+
+    #[test]
     fn decoded_ssh_agent_tcp_request_zeroizes_on_invalid_direction() {
         let encoded = NativeRequest {
             protocol_version: PROTOCOL_VERSION,
@@ -980,10 +1056,6 @@ mod tests {
                 r#type: SshKeyType::Unspecified as i32,
                 private_key: b"invalid-enum-private-key".to_vec(),
                 public_key: b"invalid-enum-public-key".to_vec(),
-            }),
-            native_request::Operation::SshPrivateKeyFormat(SshPrivateKeyFormatRequest {
-                r#type: SshKeyType::Unspecified as i32,
-                private_key: b"invalid-enum-private-key".to_vec(),
             }),
             native_request::Operation::SshKeyParse(SshKeyParseRequest {
                 private_key_pem: "invalid parse private key".to_owned(),
@@ -1041,17 +1113,8 @@ mod tests {
         let _description = response_bytes(invoke(native_request::Operation::SshKeyDescribe(
             SshKeyDescribeRequest {
                 r#type: SshKeyType::Ed25519 as i32,
-                private_key: private_key.clone(),
-                public_key,
-            },
-        )));
-        assert_eq!(protocol::zeroized_secret_output_drops(), 1);
-
-        protocol::reset_zeroized_secret_output_drops();
-        let _formatted = response_bytes(invoke(native_request::Operation::SshPrivateKeyFormat(
-            SshPrivateKeyFormatRequest {
-                r#type: SshKeyType::Ed25519 as i32,
                 private_key,
+                public_key,
             },
         )));
         assert_eq!(protocol::zeroized_secret_output_drops(), 1);
@@ -1066,6 +1129,21 @@ mod tests {
                 passphrase_utf8: None,
             },
         )));
+        assert_eq!(protocol::zeroized_secret_output_drops(), 1);
+    }
+
+    #[test]
+    fn certificate_material_secret_output_zeroizes_on_drop() {
+        protocol::reset_zeroized_secret_output_drops();
+        drop(OpenPgpCertificateMaterialReconcileV2Success {
+            local_public_material: b"local public material".to_vec(),
+            local_secret_material: Some(b"local secret material".to_vec()),
+            transferable_public_certificate: Some(b"public certificate".to_vec()),
+            transferable_secret_key: Some(b"transferable secret key".to_vec()),
+            primary_fingerprint: "00".repeat(20),
+            contributions: None,
+            withheld_reasons: Vec::new(),
+        });
         assert_eq!(protocol::zeroized_secret_output_drops(), 1);
     }
 
@@ -1141,7 +1219,10 @@ mod tests {
     #[test]
     fn reports_stable_abi_and_capabilities() {
         assert_eq!(ABI_VERSION, 1);
-        assert_eq!(CAPABILITIES, 0x0fffffff);
+        assert_eq!(PROTOCOL_VERSION, 2);
+        assert_eq!(CAPABILITIES, 0xf7fffffff);
+        assert_eq!(CAPABILITIES & (1 << 31), 0, "bit 31 is retired");
+        assert_eq!(CAPABILITY_OPENPGP_V6_GENERATION_MUTATION, 1 << 35);
         assert_eq!(CAPABILITY_AES_CBC_HMAC_SHA256, 1 << 20);
         assert_eq!(CAPABILITY_AES_CBC_HMAC_SHA256_FAST_PATH, 1 << 21);
         assert_eq!(CAPABILITY_RANDOM_FAST_PATH, 1 << 23);
@@ -1150,6 +1231,35 @@ mod tests {
         assert_eq!(CAPABILITY_SSH_CXF_EXPORT, 1 << 25);
         assert_eq!(CAPABILITY_SSH_PUBLIC_KEY_DECODE, 1 << 26);
         assert_eq!(CAPABILITY_OPENPGP_CLEAR_VERIFY, 1 << 27);
+        assert_eq!(CAPABILITY_OPENPGP_EXTERNAL_REVOCATION_POLICY, 1 << 28);
+        assert_eq!(CAPABILITY_OPENPGP_SIGNED_REVOCATION, 1 << 29);
+        assert_eq!(CAPABILITY_OPENPGP_USER_ID_REPLACEMENT, 1 << 30);
+        assert_eq!(
+            CAPABILITY_OPENPGP_CERTIFICATE_MATERIAL_RECONCILE_V2,
+            1 << 32
+        );
+        assert_eq!(CAPABILITY_OPENPGP_USER_ID_CERTIFICATION, 1 << 33);
+    }
+
+    #[test]
+    fn protocol_v2_rejects_v1_requests() {
+        let request = NativeRequest {
+            protocol_version: 1,
+            operation: Some(native_request::Operation::Digest(DigestRequest {
+                algorithm: HashAlgorithm::Sha256 as i32,
+                data: b"legacy-v1-request".to_vec(),
+            })),
+        };
+
+        let response = NativeResponse::decode(call(&request.encode_to_vec()).as_slice())
+            .expect("unsupported-protocol response must decode");
+
+        assert_eq!(response.protocol_version, PROTOCOL_VERSION);
+        assert_eq!(
+            response.status.map(|status| status.code),
+            Some(NativeErrorCode::UnsupportedProtocol as i32),
+        );
+        assert!(response.result.is_none());
     }
 
     #[test]
@@ -2136,16 +2246,6 @@ mod tests {
         let plaintext = decode_hex("80000000000000000000000000000000");
         let expected =
             decode_hex("73b9ff14cf2589901ff52a0d6f4b7edef10da92ef7a287d4f38319cbf7ab1570");
-        let ciphertext = response_bytes(invoke(native_request::Operation::TwofishCbcPkcs7(
-            TwofishCbcPkcs7Request {
-                direction: CipherDirection::Encrypt as i32,
-                key: key.clone(),
-                iv: iv.clone(),
-                data: plaintext.clone(),
-            },
-        )));
-        assert_eq!(ciphertext, expected);
-
         for chunk_size in [1, 7, 16, 31] {
             let encrypt_handle =
                 open_stream(native_stream_open_request::Operation::TwofishCbcPkcs7(
@@ -2181,14 +2281,15 @@ mod tests {
         let mut corrupted = expected;
         let last = corrupted.len() - 1;
         corrupted[last] = 0;
-        let response = invoke(native_request::Operation::TwofishCbcPkcs7(
-            TwofishCbcPkcs7Request {
+        let decrypt_handle = open_stream(native_stream_open_request::Operation::TwofishCbcPkcs7(
+            TwofishCbcPkcs7StreamOpenRequest {
                 direction: CipherDirection::Decrypt as i32,
                 key,
                 iv,
-                data: corrupted,
             },
         ));
+        response_bytes(update_stream(decrypt_handle, &corrupted));
+        let response = finish_stream(decrypt_handle);
         assert_eq!(
             response.status.map(|status| status.code),
             Some(NativeErrorCode::AuthenticationFailed as i32),
@@ -2561,81 +2662,18 @@ mod tests {
     #[test]
     fn bounded_random_int_stays_in_range() {
         for _ in 0..256 {
-            let response = invoke(native_request::Operation::RandomInt(RandomIntRequest {
-                bounded: true,
-                exclusive_upper_bound: 7,
-            }));
-            match response.result {
-                Some(native_response::Result::Int32Value(value)) => {
-                    assert!((0..7).contains(&value));
-                }
-                _ => panic!("expected integer response"),
-            }
+            let value = fast::random_int(7).expect("bounded random int");
+            assert!((0..7).contains(&value));
         }
-    }
-
-    #[test]
-    fn batched_random_ints_are_exact_little_endian_values() {
-        let bytes = response_bytes(invoke(native_request::Operation::RandomInts(
-            RandomIntsRequest {
-                bounded: true,
-                exclusive_upper_bound: 256,
-                count: 17,
-            },
-        )));
-        assert_eq!(bytes.len(), 17 * size_of::<i32>());
-        for encoded in bytes.as_chunks::<{ size_of::<i32>() }>().0 {
-            assert_eq!(&encoded[1..], &[0, 0, 0]);
-            let value = i32::from_le_bytes(*encoded);
-            assert!((0..256).contains(&value));
-            assert_eq!(value.to_le_bytes(), *encoded);
-        }
-    }
-
-    #[test]
-    fn batched_random_ints_preserve_bounds_and_resource_limit() {
-        let all_zero = response_bytes(invoke(native_request::Operation::RandomInts(
-            RandomIntsRequest {
-                bounded: true,
-                exclusive_upper_bound: 1,
-                count: 32,
-            },
-        )));
-        assert_eq!(all_zero, vec![0; 32 * size_of::<i32>()]);
-
-        for bound in [2, 7, i32::MAX as u32] {
-            let bytes = response_bytes(invoke(native_request::Operation::RandomInts(
-                RandomIntsRequest {
-                    bounded: true,
-                    exclusive_upper_bound: bound,
-                    count: 256,
-                },
-            )));
-            assert_eq!(bytes.len(), 256 * size_of::<i32>());
-            for encoded in bytes.as_chunks::<{ size_of::<i32>() }>().0 {
-                let value = i32::from_le_bytes(*encoded);
-                assert!(value >= 0);
-                assert!(u32::try_from(value).is_ok_and(|value| value < bound));
-            }
-        }
-
-        let oversized = invoke(native_request::Operation::RandomInts(RandomIntsRequest {
-            bounded: false,
-            exclusive_upper_bound: 0,
-            count: 1025,
-        }));
-        assert_eq!(
-            oversized.status.map(|status| status.code),
-            Some(NativeErrorCode::ResourceLimit as i32)
-        );
     }
 
     #[test]
     fn streaming_hmac_enforces_lifecycle() {
         let open = NativeStreamOpenRequest {
             protocol_version: PROTOCOL_VERSION,
-            operation: Some(native_stream_open_request::Operation::HmacSha256(
-                HmacSha256StreamOpenRequest {
+            operation: Some(native_stream_open_request::Operation::Hmac(
+                HmacStreamOpenRequest {
+                    algorithm: HashAlgorithm::Sha256 as i32,
                     key: b"key".to_vec(),
                 },
             )),
@@ -2718,5 +2756,42 @@ mod tests {
             Some(NativeErrorCode::Ok as i32)
         );
         let _ = stream_finish(replacement_handle);
+    }
+}
+
+#[cfg(test)]
+mod drain_protocol_tests {
+    use super::*;
+
+    fn drain(handle: u64) -> NativeResponse {
+        let request = NativeRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: Some(native_request::Operation::OpenPgpStreamDrain(
+                protocol::OpenPgpStreamDrainRequest { handle },
+            )),
+        };
+        NativeResponse::decode(call(&request.encode_to_vec()).as_slice()).expect("drain response")
+    }
+
+    #[test]
+    fn drain_rejects_stale_and_non_openpgp_sessions_without_consuming_them() {
+        let response = drain(0);
+        assert_eq!(
+            response.status.expect("invalid session").code,
+            NativeErrorCode::InvalidSession as i32
+        );
+        let handle =
+            sessions::open_hmac(HashAlgorithm::Sha256, vec![0x11; 32]).expect("HMAC session");
+        let response = drain(handle);
+        assert_eq!(
+            response.status.expect("invalid operation").code,
+            NativeErrorCode::InvalidArgument as i32
+        );
+        sessions::update(handle, b"still live").expect("session preserved");
+        sessions::finish(handle).expect("finish preserved session");
+        assert_eq!(
+            drain(handle).status.expect("closed session").code,
+            NativeErrorCode::InvalidSession as i32
+        );
     }
 }

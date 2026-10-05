@@ -6,9 +6,9 @@ import com.artemchep.keyguard.common.model.DWatchtowerAlertType
 import com.artemchep.keyguard.common.model.fileName
 import com.artemchep.keyguard.common.model.fileSize
 import com.artemchep.keyguard.common.model.ignores
+import com.artemchep.keyguard.common.model.isWatchtowerEligible
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
-import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgKeygrip
 import com.artemchep.keyguard.common.service.logging.LogLevel
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.similarity.SimilarityService
@@ -16,8 +16,6 @@ import com.artemchep.keyguard.common.service.text.Base64Service
 import com.artemchep.keyguard.common.usecase.CipherDuplicatesCheck
 import com.artemchep.keyguard.platform.LeSystem
 import com.artemchep.keyguard.platform.util.isRelease
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 import kotlin.math.absoluteValue
 import kotlin.time.measureTimedValue
 
@@ -91,13 +89,6 @@ class CipherDuplicatesCheckImpl(
         val domain: String,
     )
 
-    constructor(directDI: DirectDI) : this(
-        cryptoGenerator = directDI.instance(),
-        base64Service = directDI.instance(),
-        similarityService = directDI.instance(),
-        logRepository = directDI.instance(),
-    )
-
     override fun invoke(
         ciphers: List<DSecret>,
         sensitivity: CipherDuplicatesCheck.Sensitivity,
@@ -105,7 +96,8 @@ class CipherDuplicatesCheckImpl(
         val existingGroupIds = mutableSetOf<String>()
         val pCiphers = ciphers
             .filter { cipher ->
-                !cipher.ignores(DWatchtowerAlertType.DUPLICATE)
+                cipher.isWatchtowerEligible &&
+                        !cipher.ignores(DWatchtowerAlertType.DUPLICATE)
             }
             .map { cipher ->
                 processCipher(cipher)
@@ -740,15 +732,8 @@ class CipherDuplicatesCheckImpl(
             fingerprint = gpgKey.fingerprint
                 ?.normalizeGpgFingerprint()
                 ?.takeIf(String::isNotEmpty),
-            metadata = gpgKey.metadata?.copy(
-                keys = gpgKey.metadata.keys
-                    .map { key ->
-                        key.copy(
-                            keygrip = key.keygrip.normalizeGpgKeygrip(),
-                            fingerprint = key.fingerprint.normalizeGpgFingerprint(),
-                        )
-                    },
-            ),
+            // Metadata is a derived local cache and is not part of the key's identity.
+            metadata = null,
         )
     }
 
@@ -779,20 +764,6 @@ class CipherDuplicatesCheckImpl(
             fingerprint
                 ?.takeIf(String::isNotBlank)
                 ?.let { add("fingerprint:$it") }
-            metadata
-                ?.keys
-                .orEmpty()
-                .flatMap { key ->
-                    listOfNotNull(
-                        key.fingerprint
-                            .takeIf(String::isNotBlank)
-                            ?.let { "fingerprint:$it" },
-                        key.keygrip
-                            .takeIf(String::isNotBlank)
-                            ?.let { "keygrip:$it" },
-                    )
-                }
-                .let(::addAll)
         }.distinct()
 
     private fun String?.normalizeGpgArmor(): String? = this

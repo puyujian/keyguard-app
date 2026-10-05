@@ -51,7 +51,7 @@ private const val SSH_AGENT_SETUP_MACOS_DEV_SOCKET =
 //
 // https://github.com/AChep/keyguard-app/issues/1440
 private const val SSH_AGENT_SETUP_MACOS_RELEASE_SOCKET =
-    $$"${HOME}/Library/Group Containers/com.artemchep.keyguard/ssh-agent.sock"
+    $$"${HOME}/.keyguard/ssh-agent.sock"
 private const val SSH_AGENT_SETUP_LINUX_SOCKET =
     $$"${XDG_RUNTIME_DIR}/keyguard-ssh-agent.sock"
 private const val SSH_AGENT_SETUP_LINUX_SOCKET_FALLBACK =
@@ -86,12 +86,9 @@ pkg update"""
 
 private const val SSH_AGENT_TERMUX_PKG_INSTALL = """pkg install keyguard-android-ssh-agent"""
 
-private const val SSH_AGENT_TERMUX_PKG_SETUP_CURRENT =
-    $$"""eval "$("$PREFIX/bin/keyguard-android-ssh-agent" -a "$PREFIX/tmp/keyguard-ssh-agent.sock")""""
-
-private const val SSH_AGENT_TERMUX_PKG_SETUP_STARTUP =
+private const val SSH_AGENT_TERMUX_PKG_SETUP =
     $$"""if [ -x "$PREFIX/bin/keyguard-android-ssh-agent" ]; then
-  eval "$("$PREFIX/bin/keyguard-android-ssh-agent" -a "$PREFIX/tmp/keyguard-ssh-agent.sock")"
+  eval "$("$PREFIX/bin/keyguard-android-ssh-agent" --ensure -a "$PREFIX/tmp/keyguard-ssh-agent.sock")"
 fi"""
 
 @Composable
@@ -339,13 +336,6 @@ private fun ColumnScope.SshAgentSetupAndroidPlatformContent() {
         modifier = Modifier
             .height(4.dp),
     )
-    AgentSetupCodeBlock(
-        text = SSH_AGENT_TERMUX_PKG_SETUP_CURRENT,
-    )
-    Spacer(
-        modifier = Modifier
-            .height(8.dp),
-    )
     AgentSetupParagraph(
         text = stringResource(Res.string.ssh_agent_setup_android_termux_step_3_shell_startup),
     )
@@ -354,7 +344,7 @@ private fun ColumnScope.SshAgentSetupAndroidPlatformContent() {
             .height(4.dp),
     )
     AgentSetupCodeBlock(
-        text = SSH_AGENT_TERMUX_PKG_SETUP_STARTUP,
+        text = SSH_AGENT_TERMUX_PKG_SETUP,
     )
     Section(
         text = stringResource(Res.string.ssh_agent_setup_android_termux_step_4_title),

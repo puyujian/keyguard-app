@@ -8,14 +8,13 @@ import com.artemchep.keyguard.common.model.MasterSession
 import com.artemchep.keyguard.common.service.file.FileService
 import com.artemchep.keyguard.common.service.keepass.DefaultKeePassAttachmentStorageFactory
 import com.artemchep.keyguard.common.service.keepass.KeePassAttachmentReader
+import com.artemchep.keyguard.common.service.session.AttachmentSessionAccess
 import com.artemchep.keyguard.common.service.staging.StagingSpoolFactory
 import com.artemchep.keyguard.common.service.text.Base32Service
 import com.artemchep.keyguard.common.service.text.Base64Service
-import com.artemchep.keyguard.common.service.webdav.KtorWebDavClientFactory
 import com.artemchep.keyguard.common.usecase.GetVaultSession
 import com.artemchep.keyguard.provider.bitwarden.repository.BitwardenCipherRepository
 import com.artemchep.keyguard.provider.bitwarden.repository.ServiceTokenRepository
-import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,9 +25,6 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import org.kodein.di.DirectDI
-import org.kodein.di.direct
-import org.kodein.di.instance
 
 interface DownloadAttachmentSourceLoader {
     fun fileLoader(
@@ -44,12 +40,8 @@ internal class DownloadAttachmentSessionUnavailableException : IllegalStateExcep
 class DownloadAttachmentSourceLoaderImpl internal constructor(
     private val downloadTask: DownloadTask,
     private val getVaultSession: GetVaultSession,
+    private val sessionAccess: AttachmentSessionAccess,
 ) : DownloadAttachmentSourceLoader {
-    constructor(directDI: DirectDI) : this(
-        downloadTask = directDI.instance(),
-        getVaultSession = directDI.instance(),
-    )
-
     override fun fileLoader(
         request: DownloadAttachmentRequestData,
         writer: DownloadWriter,
@@ -67,26 +59,23 @@ class DownloadAttachmentSourceLoaderImpl internal constructor(
         )
 
         is DownloadAttachmentRequestData.KeePassSource -> flow {
-            when (val session = getVaultSession().first()) {
-                is MasterSession.Key -> {
-                    val loader = session.di.direct.instance<KeePassAttachmentSourceLoader>()
-                    emitAll(
-                        loader.fileLoader(
-                            request = request,
-                            source = source,
-                            writer = writer,
-                        ),
-                    )
-                }
-
-                is MasterSession.Empty -> {
-                    emit(DownloadProgress.Loading())
-                    emit(
-                        DownloadProgress.Complete(
-                            DownloadAttachmentSessionUnavailableException().left(),
-                        ),
-                    )
-                }
+            val loader = (getVaultSession().first() as? MasterSession.Key)
+                ?.let(sessionAccess::invoke)
+            if (loader != null) {
+                emitAll(
+                    loader.fileLoader(
+                        request = request,
+                        source = source,
+                        writer = writer,
+                    ),
+                )
+            } else {
+                emit(DownloadProgress.Loading())
+                emit(
+                    DownloadProgress.Complete(
+                        DownloadAttachmentSessionUnavailableException().left(),
+                    ),
+                )
             }
         }
     }
@@ -104,24 +93,6 @@ internal class KeePassAttachmentSourceLoaderImpl internal constructor(
     private val keePassSourceResolver: KeePassAttachmentSourceResolver,
     private val keePassAttachmentReader: KeePassAttachmentReader,
 ) : KeePassAttachmentSourceLoader {
-    constructor(directDI: DirectDI) : this(
-        keePassSourceResolver = KeePassAttachmentSourceResolverImpl(
-            tokenRepository = directDI.instance<ServiceTokenRepository>(),
-            cipherRepository = directDI.instance<BitwardenCipherRepository>(),
-            base32Service = directDI.instance<Base32Service>(),
-        ),
-        keePassAttachmentReader = KeePassAttachmentReader(
-            base64Service = directDI.instance<Base64Service>(),
-            storageFactory = DefaultKeePassAttachmentStorageFactory(
-                fileService = directDI.instance<FileService>(),
-                webDavClientFactory = KtorWebDavClientFactory(
-                    httpClient = directDI.instance<HttpClient>(),
-                ),
-            ),
-            stagingSpoolFactory = directDI.instance<StagingSpoolFactory>(),
-        ),
-    )
-
     // The generic catch converts any load failure into a Complete(left)
     // event; fatal errors and cancellation are rethrown first.
     @Suppress("TooGenericExceptionCaught")

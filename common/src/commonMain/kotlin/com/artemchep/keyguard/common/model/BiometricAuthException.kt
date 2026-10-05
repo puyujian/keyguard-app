@@ -106,5 +106,16 @@ class BiometricAuthException(
          * affected sensor(s) are unavailable until a security update has addressed the issue.
          */
         const val ERROR_SECURITY_UPDATE_REQUIRED = 15
+
+        /**
+         * The platform credential used for biometric encryption was reset or removed.
+         */
+        const val ERROR_KEY_INVALIDATED = 16
+
+        /**
+         * Linux only: the system authentication rule (polkit policy) is not
+         * installed, the message explains how to install it.
+         */
+        const val ERROR_POLICY_NOT_INSTALLED = 17
     }
 }

@@ -122,31 +122,15 @@ class NativeCryptoPrimitivesInputTest {
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            NativeCryptoPrimitives.twofishCbcPkcs7Encrypt(
+            NativeCryptoPrimitives.createTwofishCbcPkcs7Encryptor(
                 key = ByteArray(15),
                 iv = ByteArray(16),
-                data = ByteArray(0),
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            NativeCryptoPrimitives.twofishCbcPkcs7Encrypt(
+            NativeCryptoPrimitives.createTwofishCbcPkcs7Decryptor(
                 key = ByteArray(16),
                 iv = ByteArray(15),
-                data = ByteArray(0),
-            )
-        }
-        assertFailsWith<IllegalArgumentException> {
-            NativeCryptoPrimitives.twofishCbcPkcs7Decrypt(
-                key = ByteArray(16),
-                iv = ByteArray(16),
-                data = ByteArray(0),
-            )
-        }
-        assertFailsWith<IllegalArgumentException> {
-            NativeCryptoPrimitives.twofishCbcPkcs7Decrypt(
-                key = ByteArray(16),
-                iv = ByteArray(16),
-                data = ByteArray(15),
             )
         }
     }
@@ -305,6 +289,56 @@ class NativeCryptoPrimitivesInputTest {
                 privateKeyData = null,
                 publicKeyData = byteArrayOf(1),
                 referenceTimeEpochSeconds = -1L,
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            NativeCrypto.openPgp.evaluateUserIdCertifications(
+                publicKey = byteArrayOf(1),
+                authorities = emptyList(),
+                referenceTimeEpochSeconds = -1L,
+            )
+        }
+    }
+
+    @Test
+    fun rejectsInvalidOpenPgpCertificationAuthorityInputsBeforeCallingNativeCode() {
+        assertFailsWith<IllegalArgumentException> {
+            NativeCrypto.openPgp.evaluateUserIdCertifications(
+                publicKey = byteArrayOf(),
+                authorities = emptyList(),
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            NativeCrypto.openPgp.evaluateUserIdCertifications(
+                publicKey = byteArrayOf(1),
+                authorities = listOf(
+                    NativeOpenPgpCertificationAuthority(
+                        publicKey = byteArrayOf(),
+                        primaryFingerprint = "A".repeat(40),
+                    ),
+                ),
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            NativeCrypto.openPgp.evaluateUserIdCertifications(
+                publicKey = byteArrayOf(1),
+                authorities = listOf(
+                    NativeOpenPgpCertificationAuthority(
+                        publicKey = byteArrayOf(2),
+                        primaryFingerprint = "not-a-fingerprint",
+                    ),
+                ),
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            NativeCrypto.openPgp.evaluateUserIdCertifications(
+                publicKey = byteArrayOf(1),
+                authorities = List(NativeCryptoOpenPgp.MAX_KEY_DOCUMENTS_PER_REQUEST) {
+                    NativeOpenPgpCertificationAuthority(
+                        publicKey = byteArrayOf(2),
+                        primaryFingerprint = "A".repeat(40),
+                    )
+                },
             )
         }
     }

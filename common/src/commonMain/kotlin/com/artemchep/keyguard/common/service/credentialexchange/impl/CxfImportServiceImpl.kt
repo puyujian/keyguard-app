@@ -16,9 +16,9 @@ import com.artemchep.keyguard.common.service.credentialexchange.model.CxfEditabl
 import com.artemchep.keyguard.common.service.credentialexchange.model.CxfItem
 import com.artemchep.keyguard.common.service.credentialexchange.model.CxfLinkedItem
 import com.artemchep.keyguard.common.service.credentialexchange.model.CxfVersion
-import com.artemchep.keyguard.common.service.crypto.PasskeyCrypto
+import com.artemchep.keyguard.util.webauthn.crypto.PasskeyCrypto
 import com.artemchep.keyguard.common.service.crypto.SshKeyImportService
-import com.artemchep.keyguard.crypto.NativePasskeyCrypto
+import com.artemchep.keyguard.util.webauthn.crypto.NativePasskeyCrypto
 import kotlin.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -28,8 +28,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
 
 /**
  * The importer's document boundary.
@@ -51,13 +49,6 @@ class CxfImportServiceImpl internal constructor(
          */
         private const val VERSION_MAJOR_LEGACY = 0
     }
-
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        passkeyCrypto = directDI.instance(),
-        sshKeyImportService = directDI.instance(),
-    )
 
     constructor(
         passkeyCrypto: PasskeyCrypto,

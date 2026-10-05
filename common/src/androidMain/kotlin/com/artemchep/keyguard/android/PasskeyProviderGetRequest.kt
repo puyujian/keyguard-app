@@ -1,8 +1,6 @@
 package com.artemchep.keyguard.android
 
 import android.annotation.SuppressLint
-import android.app.Application
-import android.content.Context
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.credentials.GetCredentialResponse
@@ -15,49 +13,31 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.credentials.webauthn.PublicKeyCredentialRequestOptions
 import com.artemchep.keyguard.common.model.DPrivilegedApp
 import com.artemchep.keyguard.common.model.DSecret
-import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
-import com.artemchep.keyguard.common.service.crypto.PasskeyCrypto
-import com.artemchep.keyguard.common.service.crypto.PasskeySignResult
-import com.artemchep.keyguard.common.service.crypto.PasskeySignatureAlgorithm
+import com.artemchep.keyguard.common.service.passkey.toWebAuthnCredential
 import com.artemchep.keyguard.common.service.text.Base64Service
 import com.artemchep.keyguard.common.service.text.decodeOrNull
-import com.artemchep.keyguard.common.service.webauthn.PasskeyBase64
-import com.artemchep.keyguard.common.service.webauthn.PasskeyCredentialId
-import com.artemchep.keyguard.common.service.webauthn.WebAuthnEncodingException
-import com.artemchep.keyguard.common.service.webauthn.WebAuthnNotAllowedException
-import com.artemchep.keyguard.common.service.webauthn.requireCredentialAllowedByRequestOptions as requireWebAuthnCredentialAllowedByRequestOptions
-import com.artemchep.keyguard.common.service.webauthn.requireCredentialRpIdMatchesRequest as requireWebAuthnCredentialRpIdMatchesRequest
+import com.artemchep.keyguard.util.webauthn.PasskeyBase64
+import com.artemchep.keyguard.util.webauthn.PasskeyCredentialId
+import com.artemchep.keyguard.util.webauthn.WebAuthnAssertionRequest
+import com.artemchep.keyguard.util.webauthn.WebAuthnAuthenticator
+import com.artemchep.keyguard.util.webauthn.WebAuthnCallerContext
+import com.artemchep.keyguard.util.webauthn.WebAuthnEncodingException
+import com.artemchep.keyguard.util.webauthn.WebAuthnNotAllowedException
+import com.artemchep.keyguard.util.webauthn.parseWebAuthnAllowedCredentialDescriptors
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-
-private const val MAX_ENCODED_PASSKEY_KEY_CHARS = 5_464
 
 class PasskeyProviderGetRequest(
-    private val context: Context,
     private val json: Json,
-    private val base64Service: Base64Service,
-    private val cryptoService: CryptoGenerator,
-    private val passkeyCrypto: PasskeyCrypto,
     private val passkeyUtils: PasskeyUtils,
+    private val authenticator: WebAuthnAuthenticator,
+    private val base64Service: Base64Service,
 ) {
-    constructor(
-        directDI: DirectDI,
-    ) : this(
-        context = directDI.instance<Application>(),
-        json = directDI.instance(),
-        base64Service = directDI.instance(),
-        cryptoService = directDI.instance(),
-        passkeyCrypto = directDI.instance(),
-        passkeyUtils = directDI.instance(),
-    )
 
     @SuppressLint("RestrictedApi")
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -70,7 +50,6 @@ class PasskeyProviderGetRequest(
         val opt = request.credentialOptions.first() as GetPublicKeyCredentialOption
         val js = PublicKeyCredentialRequestOptions(opt.requestJson)
 
-        val challenge = PasskeyBase64.encodeToString(js.challenge)
         val origin = passkeyUtils.callingAppOrigin(
             appInfo = request.callingAppInfo,
             privilegedApps = privilegedApps,
@@ -81,84 +60,22 @@ class PasskeyProviderGetRequest(
             origin = origin,
             packageName = packageName,
         )
-        requireCredentialRpIdMatchesRequest(
-            credential = credential,
-            rpId = rpId,
-        )
-        requireCredentialAllowedByRequestOptions(
-            credential = credential,
-            requestJson = opt.requestJson,
-            json = json,
-        )
-
-        val credentialIdBytes = PasskeyCredentialId.encode(credential.credentialId)
-
-        val counter = kotlin.run {
-            val tmp = credential.counter ?: 0
-            if (tmp > 0) {
-                // Modern Bitwarden seems to use 0 for passkeys without a signature
-                // counter. Non-zero counters are legacy; we preserve them but
-                // do not increment them because keeping counters monotonic
-                // across devices requires sync coordination.
-                tmp
-            } else {
-                0
-            }
-        }
-        val defaultAuthenticatorData = passkeyUtils.authData(
-            rpId = rpId,
-            counter = counter,
-            credentialId = credentialIdBytes,
-            credentialPublicKey = null,
-            userVerification = passkeyUtils.userVerification(
-                mode = js.userVerification,
+        val responseJson = mapGetWebAuthnExceptions {
+            authenticator.getAssertion(
+                request = WebAuthnAssertionRequest(
+                    challenge = js.challenge,
+                    userVerification = js.userVerification,
+                    allowedCredentials = parseWebAuthnAllowedCredentialDescriptors(opt.requestJson, json),
+                ),
+                context = WebAuthnCallerContext(origin, rpId, packageName),
+                credential = credential.toWebAuthnCredential(),
                 userVerified = userVerified,
-            ),
-            userPresence = true,
-        )
-
-        val clientDataJsonBytes = kotlin.run {
-            val jsonObject = buildJsonObject {
-                put("type", "webauthn.get")
-                put("challenge", challenge)
-                put("origin", origin)
-                put("androidPackageName", packageName)
-            }
-            json.encodeToString(jsonObject)
-                .toByteArray()
+                clientDataHash = opt.clientDataHash,
+            )
         }
-        val clientDataJsonHash = opt.clientDataHash
-            ?: cryptoService.hashSha256(clientDataJsonBytes)
-
-        val signature = kotlin.run {
-            requireSignableStoredKey(credential)
-            val dataToSign = defaultAuthenticatorData + clientDataJsonHash
-            val privateKeyPkcs8 = base64Service.decodeOrNull(credential.keyValue)
-                ?: throw storedPasskeyKeyEncodingError()
-            val result = try {
-                passkeyCrypto.sign(
-                    algorithm = PasskeySignatureAlgorithm.ES256,
-                    privateKeyPkcs8 = privateKeyPkcs8,
-                    data = dataToSign,
-                )
-            } finally {
-                privateKeyPkcs8.fill(0)
-                dataToSign.fill(0)
-            }
-            when (result) {
-                is PasskeySignResult.Success -> result.signatureDer
-                is PasskeySignResult.Error -> throw storedPasskeyKeyEncodingError()
-            }
-        }
-        val encodedSignature = try {
-            PasskeyBase64.encodeToString(signature)
-        } finally {
-            signature.fill(0)
-        }
-
         val prfEvalInput = resolvePasskeyPrfEvalInput(
             requestJson = opt.requestJson,
-            credentialIdBytes = credentialIdBytes,
+            credentialIdBytes = PasskeyCredentialId.encode(credential.credentialId),
             json = json,
         )
         val prfSecretBytes = if (userVerified) {
@@ -183,49 +100,8 @@ class PasskeyProviderGetRequest(
         } finally {
             prfSecretBytes?.fill(0)
         }
-
-        val r = assertionResponseJson(
-            // 受信浏览器会提供它自己生成的 clientDataHash。此时必须省略本地拼装的
-            // clientDataJSON，让 Credential Manager 把浏览器原始值补回响应；否则签名
-            // 使用浏览器哈希、服务端却对本地 JSON 重算哈希，认证一定失败。
-            clientDataJson = assertionClientDataJsonForResponse(
-                clientDataJsonBytes = clientDataJsonBytes,
-                clientDataHash = opt.clientDataHash,
-            ),
-            authenticatorData = PasskeyBase64.encodeToString(defaultAuthenticatorData),
-            signature = encodedSignature,
-            userHandle = credential.userHandle,
-        )
-        val authenticationResponse = buildJsonObject {
-            put("id", PasskeyBase64.encodeToString(credentialIdBytes))
-            put("rawId", credentialIdBytes)
-            put("type", "public-key")
-            put("authenticatorAttachment", "cross-platform")
-            put("response", r)
-            put("clientExtensionResults", buildJsonObject {
-                prfExtensionResult?.let { put("prf", it) }
-            })
-        }
-        val authenticationResponseJson = json.encodeToString(authenticationResponse)
-        val passkeyCredential = PublicKeyCredential(authenticationResponseJson)
-        return GetCredentialResponse(passkeyCredential)
-    }
-
-    /**
-     * Rejects a stored credential this provider cannot produce an assertion
-     * for: only an ES256 key — `public-key` / `ECDSA` / `P-256` — is signable
-     * here, and the encoded key is length-capped before it reaches the Base64
-     * decoder so a malformed vault entry cannot turn into an unbounded decode.
-     */
-    private fun requireSignableStoredKey(
-        credential: DSecret.Login.Fido2Credentials,
-    ) {
-        val isEs256 = credential.keyType == "public-key" &&
-            credential.keyAlgorithm == "ECDSA" &&
-            credential.keyCurve == "P-256"
-        if (!isEs256 || credential.keyValue.length > MAX_ENCODED_PASSKEY_KEY_CHARS) {
-            throw storedPasskeyKeyEncodingError()
-        }
+        val authenticationResponseJson = withPasskeyPrfExtensionResult(responseJson, prfExtensionResult, json)
+        return GetCredentialResponse(PublicKeyCredential(authenticationResponseJson))
     }
 
     private fun requestRpIdOrNull(
@@ -239,10 +115,6 @@ class PasskeyProviderGetRequest(
 
         val primitive = body["rpId"] as? JsonPrimitive
         return primitive?.contentOrNull.orEmpty()
-    }
-
-    private fun JsonObjectBuilder.put(key: String, data: ByteArray) {
-        put(key, PasskeyBase64.encodeToString(data))
     }
 }
 
@@ -357,58 +229,7 @@ internal fun decodeStoredPrfSecretOrNull(
     return null
 }
 
-private fun storedPasskeyKeyEncodingError() = GetPublicKeyCredentialDomException(
-    domError = EncodingError(),
-    errorMessage = "The stored passkey key is malformed or unsupported.",
-)
-
-internal fun assertionResponseJson(
-    clientDataJson: String?,
-    authenticatorData: String,
-    signature: String,
-    userHandle: String?,
-): JsonObject = buildJsonObject {
-    clientDataJson?.let { put("clientDataJSON", it) }
-    put("authenticatorData", authenticatorData)
-    put("signature", signature)
-    userHandle
-        ?.takeIf { it.isNotEmpty() }
-        ?.let { put("userHandle", it) }
-}
-
-internal fun assertionClientDataJsonForResponse(
-    clientDataJsonBytes: ByteArray,
-    clientDataHash: ByteArray?,
-    encode: (ByteArray) -> String = PasskeyBase64::encodeToString,
-): String? = if (clientDataHash == null) {
-    encode(clientDataJsonBytes)
-} else {
-    null
-}
-
-internal fun requireCredentialRpIdMatchesRequest(
-    credential: DSecret.Login.Fido2Credentials,
-    rpId: String,
-) = requireWebAuthnCredentialRpIdMatchesRequest(
-    credential = credential,
-    rpId = rpId,
-)
-
-internal fun requireCredentialAllowedByRequestOptions(
-    credential: DSecret.Login.Fido2Credentials,
-    requestJson: String,
-    json: Json,
-    decodeCredentialId: (String) -> ByteArray = PasskeyBase64::decode,
-) = mapGetWebAuthnExceptions {
-    requireWebAuthnCredentialAllowedByRequestOptions(
-        credential = credential,
-        requestJson = requestJson,
-        json = json,
-        decodeCredentialId = decodeCredentialId,
-    )
-}
-
-private inline fun <T> mapGetWebAuthnExceptions(
+internal inline fun <T> mapGetWebAuthnExceptions(
     block: () -> T,
 ): T {
     try {

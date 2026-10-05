@@ -4,12 +4,11 @@ import com.artemchep.keyguard.common.io.IO
 import com.artemchep.keyguard.common.io.io
 import com.artemchep.keyguard.common.service.placeholder.Placeholder
 import com.artemchep.keyguard.common.service.placeholder.PlaceholderScope
+import com.artemchep.keyguard.common.util.formatDateTimeMachine
 import kotlin.time.Instant
-import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
-import org.kodein.di.DirectDI
 
 class DateTimePlaceholder(
     private val now: Instant,
@@ -24,17 +23,6 @@ class DateTimePlaceholder(
         now.toLocalDateTime(tz)
     }
 
-    private fun formatDateTimeMachine(
-        localDateTime: LocalDateTime,
-    ): String = buildString {
-        append(localDateTime.year.toString().padStart(4, '0'))
-        append(localDateTime.month.number.toString().padStart(2, '0'))
-        append(localDateTime.day.toString().padStart(2, '0'))
-        append(localDateTime.hour.toString().padStart(2, '0'))
-        append(localDateTime.minute.toString().padStart(2, '0'))
-        append(localDateTime.second.toString().padStart(2, '0'))
-    }
-
     override fun get(
         key: String,
     ): IO<String?>? = when {
@@ -44,7 +32,7 @@ class DateTimePlaceholder(
 
         // Current local date/time as a simple, sortable string.
         key.equals("dt_simple", ignoreCase = true) -> {
-            formatDateTimeMachine(localDateTime).let(::io)
+            localDateTime.formatDateTimeMachine().let(::io)
         }
         // Year component of the current local date/time.
         key.equals("dt_year", ignoreCase = true) -> {
@@ -77,7 +65,7 @@ class DateTimePlaceholder(
 
         // Current UTC date/time as a simple, sortable string.
         key.equals("dt_utc_simple", ignoreCase = true) -> {
-            formatDateTimeMachine(utcDateTime).let(::io)
+            utcDateTime.formatDateTimeMachine().let(::io)
         }
         // Year component of the current UTC date/time.
         key.equals("dt_utc_year", ignoreCase = true) -> {
@@ -108,13 +96,7 @@ class DateTimePlaceholder(
         else -> null
     }
 
-    class Factory(
-    ) : Placeholder.Factory {
-        constructor(
-            directDI: DirectDI,
-        ) : this(
-        )
-
+    class Factory : Placeholder.Factory {
         override fun createOrNull(
             scope: PlaceholderScope,
         ) = DateTimePlaceholder(

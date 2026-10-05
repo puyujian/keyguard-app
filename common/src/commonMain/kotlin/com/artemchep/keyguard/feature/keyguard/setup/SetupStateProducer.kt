@@ -6,9 +6,10 @@ import arrow.core.None
 import arrow.core.Option
 import arrow.core.getOrElse
 import arrow.core.identity
-import arrow.core.partially1
 import arrow.core.some
 import com.artemchep.keyguard.common.io.IO
+import com.artemchep.keyguard.common.io.bind
+import com.artemchep.keyguard.common.io.ioEffect
 import com.artemchep.keyguard.common.io.ioRaise
 import com.artemchep.keyguard.common.model.BiometricAuthPrompt
 import com.artemchep.keyguard.common.model.Loadable
@@ -18,7 +19,7 @@ import com.artemchep.keyguard.feature.auth.common.SwitchFieldModel
 import com.artemchep.keyguard.feature.auth.common.TextFieldModel
 import com.artemchep.keyguard.feature.auth.common.textFieldHandle
 import com.artemchep.keyguard.feature.auth.common.Validated
-import com.artemchep.keyguard.feature.auth.common.util.validatedPassword
+import com.artemchep.keyguard.feature.auth.common.util.validatedPassword as validateMasterPassword
 import com.artemchep.keyguard.feature.loading.LoadingTask
 import com.artemchep.keyguard.feature.localization.TextHolder
 import com.artemchep.keyguard.feature.navigation.state.RememberStateFlowScope
@@ -104,7 +105,7 @@ suspend fun RememberStateFlowScope.setupStateProducer(
     )
     return combine(
         passwordHandle.sink
-            .map { cell -> cell to validatedPassword(cell.text) },
+            .map { cell -> cell to validateMasterPassword(cell.text) },
         crashlyticsSink,
         biometricStateFlow,
         executor.isExecutingFlow,
@@ -127,11 +128,11 @@ suspend fun RememberStateFlowScope.setupStateProducer(
             ),
             isLoading = taskIsExecuting,
             onCreateVault = if (canCreateVault) {
-                crashlyticsSetEnabled(crashlytics)
                 // If the biometric is checked & possible, then ask user to
                 // confirm his identity.
                 if (createVaultWithMasterPasswordAndBiometricFn != null && biometric?.checked == true) {
                     var promptWrapper: Option<BiometricAuthPrompt?> = None
+                    var promptPassword: String? = null
                     val promptMutex by lazy {
                         Mutex()
                     }
@@ -139,15 +140,23 @@ suspend fun RememberStateFlowScope.setupStateProducer(
                     // An action should trigger the biometric prompt upon
                     // execution.
                     fun() {
+                        val password = passwordHandle.sink.value.text
                         screenScope.launch {
+                            val currentPassword = validateMasterPassword(password)
+                            if (currentPassword !is Validated.Success) return@launch
                             // Get or create the prompt and remember
                             // it for the future invocations.
                             val prompt = promptMutex.withLock {
+                                if (promptPassword != currentPassword.model) {
+                                    promptWrapper = None
+                                    promptPassword = currentPassword.model
+                                }
                                 promptWrapper.getOrElse {
                                     createPromptOrNull(
                                         executor = executor,
                                         createVaultWithMasterPasswordAndBiometricFn = createVaultWithMasterPasswordAndBiometricFn,
-                                        password = validatedPassword.model,
+                                        password = currentPassword.model,
+                                        crashlytics = crashlytics,
                                     )
                                 }.also {
                                     promptWrapper = it.some()
@@ -158,7 +167,17 @@ suspend fun RememberStateFlowScope.setupStateProducer(
                         }
                     }
                 } else {
-                    createVaultByMasterPasswordFn.partially1(validatedPassword.model)
+                    fun() {
+                        // Submit the canonical input even when the UI still
+                        // holds a callback from the previous state emission.
+                        val password = passwordHandle.sink.value.text
+                        screenScope.launch {
+                            val currentPassword = validateMasterPassword(password)
+                            if (currentPassword is Validated.Success) {
+                                createVaultByMasterPasswordFn(currentPassword.model, crashlytics)
+                            }
+                        }
+                    }
                 }
             } else {
                 null
@@ -172,9 +191,9 @@ private suspend fun createPromptOrNull(
     executor: LoadingTask,
     createVaultWithMasterPasswordAndBiometricFn: CreateVaultWithBiometric,
     password: String,
+    crashlytics: Boolean,
 ): BiometricAuthPrompt? = run {
-    val createVault = createVaultWithMasterPasswordAndBiometricFn
-        .partially1(password)
+    val createVault = { createVaultWithMasterPasswordAndBiometricFn(password, crashlytics) }
     // Creating a cipher may fail with:
     // Fatal Exception:
     //     java.security.ProviderException
@@ -209,7 +228,7 @@ private suspend fun createPromptOrNull(
 private open class CreateVaultWithPassword(
     private val executor: LoadingTask,
     private val getCreateIo: (String) -> IO<Unit>,
-) : (String) -> Unit {
+) {
     // Create from vault state options
     constructor(
         executor: LoadingTask,
@@ -219,8 +238,11 @@ private open class CreateVaultWithPassword(
         getCreateIo = options.getCreateIo,
     )
 
-    override fun invoke(password: String) {
-        val io = getCreateIo(password)
+    operator fun invoke(password: String, crashlytics: Boolean) {
+        val io = ioEffect {
+            crashlyticsSetEnabled(crashlytics)
+            getCreateIo(password).bind()
+        }
         executor.execute(io, password)
     }
 }

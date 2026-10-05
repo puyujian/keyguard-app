@@ -12,7 +12,7 @@ use ssh_agent_lib::proto::Identity;
 use ssh_agent_lib::proto::SignRequest;
 use ssh_encoding::Encode;
 use ssh_key::{Algorithm, Signature};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 #[cfg(windows)]
 use crate::ipc::messages::CallerAuthorization;
@@ -52,6 +52,8 @@ pub struct KeyguardAgent<K: KeyProvider> {
     key_provider: K,
     caller: Option<CallerIdentity>,
     session_bindings: SessionBindingState,
+    #[cfg(windows)]
+    windows_caller_guard: Option<std::sync::Arc<crate::windows_identity::WindowsCallerIdentity>>,
     #[cfg(target_os = "macos")]
     macos_caller_guard: Option<keyguard_agent_identity::macos::MacosPeerIdentity>,
     #[cfg(target_os = "linux")]
@@ -66,6 +68,8 @@ impl<K: KeyProvider> KeyguardAgent<K> {
             key_provider,
             caller: None,
             session_bindings: SessionBindingState::default(),
+            #[cfg(windows)]
+            windows_caller_guard: None,
             #[cfg(target_os = "macos")]
             macos_caller_guard: None,
             #[cfg(target_os = "linux")]
@@ -79,6 +83,8 @@ impl<K: KeyProvider> KeyguardAgent<K> {
             key_provider,
             caller,
             session_bindings: SessionBindingState::default(),
+            #[cfg(windows)]
+            windows_caller_guard: None,
             #[cfg(target_os = "macos")]
             macos_caller_guard: None,
             #[cfg(target_os = "linux")]
@@ -124,12 +130,28 @@ impl<K: KeyProvider> KeyguardAgent<K> {
     }
 
     #[cfg(windows)]
-    fn with_windows_caller(key_provider: K, caller: Option<CallerIdentity>) -> Self {
+    fn with_windows_caller(
+        key_provider: K,
+        caller: Option<CallerIdentity>,
+        guard: Option<crate::windows_identity::WindowsCallerIdentity>,
+    ) -> Self {
         Self {
             key_provider,
             caller,
             session_bindings: SessionBindingState::default(),
+            windows_caller_guard: guard.map(std::sync::Arc::new),
         }
+    }
+
+    #[cfg(windows)]
+    fn ensure_windows_caller_valid(&mut self) -> Result<(), AgentError> {
+        if let (Some(guard), Some(caller)) = (&self.windows_caller_guard, &mut self.caller) {
+            guard.update_caller(caller).map_err(|error| {
+                warn!(%error, "Windows pipe opener changed; refusing agent operation");
+                AgentError::Failure
+            })?;
+        }
+        Ok(())
     }
 
     /// Returns the verified session-binding context for this connection.
@@ -223,6 +245,8 @@ impl<K: KeyProvider> Session for KeyguardAgent<K> {
     async fn request_identities(&mut self) -> Result<Vec<Identity>, AgentError> {
         debug!("Handling RequestIdentities");
 
+        #[cfg(windows)]
+        self.ensure_windows_caller_valid()?;
         #[cfg(target_os = "macos")]
         self.ensure_macos_caller_valid()?;
         #[cfg(target_os = "linux")]
@@ -232,8 +256,9 @@ impl<K: KeyProvider> Session for KeyguardAgent<K> {
             .key_provider
             .list_keys(self.caller.clone())
             .await
-            .map_err(|e| {
-                warn!("Failed to list keys from Keyguard: {}", e);
+            .map_err(|_| {
+                // Backend error messages may contain vault data; keep only the operation.
+                warn!("Failed to list keys from Keyguard");
                 AgentError::Failure
             })?;
 
@@ -246,17 +271,14 @@ impl<K: KeyProvider> Session for KeyguardAgent<K> {
                         comment: key.name.clone(),
                     });
                 }
-                Err(e) => {
-                    warn!(
-                        name = %key.name,
-                        "Failed to parse SSH public key, skipping: {}",
-                        e
-                    );
+                Err(_) => {
+                    // Neither the key's display name nor parser input belongs in logs.
+                    warn!("Failed to parse SSH public key, skipping");
                 }
             }
         }
 
-        info!(count = identities.len(), "Returning SSH key identities");
+        debug!(count = identities.len(), "Returning SSH key identities");
         Ok(identities)
     }
 
@@ -273,13 +295,16 @@ impl<K: KeyProvider> Session for KeyguardAgent<K> {
         #[cfg(target_os = "linux")]
         self.ensure_linux_caller_valid()?;
 
+        #[cfg(windows)]
+        self.ensure_windows_caller_valid()?;
+
         // Find the matching key by comparing the public key data.
         let keys_response = self
             .key_provider
             .list_keys(self.caller.clone())
             .await
-            .map_err(|e| {
-                warn!("Failed to list keys for sign request: {}", e);
+            .map_err(|_| {
+                warn!("Failed to list keys for sign request");
                 AgentError::Failure
             })?;
 
@@ -297,23 +322,22 @@ impl<K: KeyProvider> Session for KeyguardAgent<K> {
             return Err(AgentError::Failure);
         };
 
-        info!(
-            name = %key.name,
-            "Requesting signature from Keyguard"
-        );
+        debug!("Requesting signature from Keyguard");
 
         // Request signing from Keyguard (may prompt user for approval).
-        let sign_caller = self.caller_for_sign();
+        #[cfg(windows)]
+        self.ensure_windows_caller_valid()?;
         #[cfg(target_os = "macos")]
         self.ensure_macos_caller_valid()?;
         #[cfg(target_os = "linux")]
         self.ensure_linux_caller_valid()?;
+        let sign_caller = self.caller_for_sign();
         let sign_response = self
             .key_provider
             .sign_data(&key.public_key, &request.data, request.flags, sign_caller)
             .await
-            .map_err(|e| {
-                warn!("Signing request failed: {}", e);
+            .map_err(|_| {
+                warn!("Signing request failed");
                 AgentError::Failure
             })?;
 
@@ -409,10 +433,13 @@ where
 {
     fn new_session(
         &mut self,
-        _socket: &tokio::net::windows::named_pipe::NamedPipeServer,
+        socket: &tokio::net::windows::named_pipe::NamedPipeServer,
     ) -> impl Session {
         let caller = windows_connection_caller();
-        KeyguardAgent::with_windows_caller(self.key_provider.clone(), caller)
+        let guard = crate::windows_identity::WindowsCallerIdentity::from_pipe(socket)
+            .map_err(|error| debug!(%error, "Windows caller unavailable; using connection scope"))
+            .ok();
+        KeyguardAgent::with_windows_caller(self.key_provider.clone(), caller, guard)
     }
 }
 
@@ -420,10 +447,8 @@ where
 fn windows_connection_caller() -> Option<CallerIdentity> {
     use keyguard_agent_identity::ConnectionFingerprint;
 
-    // GetNamedPipeClientProcessId is intentionally not queried here: a client
-    // can transfer the handle and spoof/recycle that PID. Windows identity is
-    // unknown until a future design binds actual client I/O to an impersonation
-    // token, so both authorization and presentation stay connection-only.
+    // Always retain the independent connection scope, including when process
+    // discovery is unavailable or the user explicitly chooses Per connection.
     let mut caller = unverified_windows_caller();
     match ConnectionFingerprint::generate() {
         Ok(connection) => {

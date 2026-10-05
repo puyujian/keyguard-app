@@ -24,9 +24,6 @@ import com.artemchep.keyguard.provider.bitwarden.usecase.util.ModifyCipherById
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.first
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import org.kodein.di.instanceOrNull
 
 class ChangeGpgKeyExpirationByIdImpl internal constructor(
     private val getCiphers: GetCiphers,
@@ -41,13 +38,6 @@ class ChangeGpgKeyExpirationByIdImpl internal constructor(
         getCiphers = getCiphers,
         gpgKeyExpirationService = gpgKeyExpirationService,
         commitUpdatedKey = modifyCipherById.asGpgKeyExpirationCommitter(),
-    )
-
-    constructor(directDI: DirectDI) : this(
-        getCiphers = directDI.instance(),
-        modifyCipherById = directDI.instance(),
-        gpgKeyExpirationService = directDI.instanceOrNull()
-            ?: GpgKeyExpirationServiceUnsupported,
     )
 
     override val isSupported: Boolean
@@ -149,14 +139,14 @@ private fun DSecret.GpgKey.toGpgKeyMaterial(): GpgKeyMaterial = GpgKeyMaterial(
     privateKeyArmored = privateKeyArmored.orEmpty(),
     publicKeyArmored = publicKeyArmored.orEmpty(),
     fingerprint = fingerprint.orEmpty(),
-    metadata = metadata ?: GpgAgentKeyMetadata(),
+    metadata = metadata,
 )
 
 private fun BitwardenCipher.GpgKey.toGpgKeyMaterial(): GpgKeyMaterial = GpgKeyMaterial(
     privateKeyArmored = privateKeyArmored.orEmpty(),
     publicKeyArmored = publicKeyArmored.orEmpty(),
     fingerprint = fingerprint.orEmpty(),
-    metadata = metadata ?: GpgAgentKeyMetadata(),
+    metadata = metadata,
 )
 
 private fun BitwardenCipher.GpgKey.withGpgKeyMaterial(

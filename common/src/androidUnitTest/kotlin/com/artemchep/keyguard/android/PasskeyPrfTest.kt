@@ -3,19 +3,23 @@ package com.artemchep.keyguard.android
 import com.artemchep.keyguard.common.model.Argon2Mode
 import com.artemchep.keyguard.common.model.CryptoHashAlgorithm
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
-import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskeyPrfEvalInput
-import com.artemchep.keyguard.common.service.passkey.entity.CreatePasskeyPrfExtension
+import com.artemchep.keyguard.util.webauthn.entity.CreatePasskey
+import com.artemchep.keyguard.util.webauthn.entity.CreatePasskeyPrfEvalInput
+import com.artemchep.keyguard.util.webauthn.entity.CreatePasskeyPrfExtension
 import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -324,6 +328,99 @@ class PasskeyPrfTest {
         assertNull(decodeStoredPrfSecretOrNull(null) { error("不应解码") })
         assertNull(decodeStoredPrfSecretOrNull("broken") { ByteArray(31) })
         assertEquals(32, decodeStoredPrfSecretOrNull("valid") { ByteArray(32) }?.size)
+    }
+
+    @Test
+    fun `moved creation options decode the PRF extension`() {
+        val options = json.decodeFromString<CreatePasskey>(
+            """
+            {
+              "challenge":"YQ",
+              "pubKeyCredParams":[{"alg":-7,"type":"public-key"}],
+              "rp":{"id":"example.com","name":"Example"},
+              "user":{"id":"dXNlcg","name":"user","displayName":"User"},
+              "extensions":{"prf":{"eval":{"first":"YQ","second":"Yg"}}}
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(CreatePasskeyPrfEvalInput("YQ", "Yg"), options.extensions?.prf?.eval)
+    }
+
+    @Test
+    fun `PRF augmentation preserves upstream response and other extensions`() {
+        for (ceremonyResponse in listOf(
+            """{"attestationObject":"attestation","transports":["internal","usb"]}""",
+            // A trusted browser's clientDataJSON is deliberately absent.
+            """{"authenticatorData":"auth-data","signature":"signature","userHandle":"user"}""",
+        )) {
+            val original = json.parseToJsonElement(
+                """{"id":"credential","rawId":"credential","type":"public-key","response":$ceremonyResponse,"clientExtensionResults":{"other":true}}""",
+            ).jsonObject
+            val prf = buildJsonObject { put("enabled", true) }
+
+            val updated = json.parseToJsonElement(
+                withPasskeyPrfExtensionResult(json.encodeToString(original), prf, json),
+            ).jsonObject
+
+            assertEquals(original - "clientExtensionResults", updated - "clientExtensionResults")
+            val extensions = updated.getValue("clientExtensionResults").jsonObject
+            assertTrue(extensions.getValue("other").jsonPrimitive.boolean)
+            assertEquals(prf, extensions.getValue("prf"))
+            assertFalse("clientDataJSON" in updated.getValue("response").jsonObject)
+        }
+    }
+
+    @Test
+    fun `no requested PRF leaves authenticator response untouched`() {
+        val responseJson = """{"clientExtensionResults":{},"response":{"signature":"signature"}}"""
+        assertEquals(responseJson, withPasskeyPrfExtensionResult(responseJson, null, json))
+        assertNull(createPasskeyPrfExtensionResult(null, true, ByteArray(32), { _, _ -> error("No PRF requested") }))
+        assertNull(createGetPasskeyPrfExtensionResult(null, true, ByteArray(32), { _, _ -> error("No PRF requested") }))
+    }
+
+    @Test
+    fun `Hybrid input must be exactly a SHA256 value`() {
+        for (size in listOf(0, 31, 33)) {
+            assertFailsWith<IllegalArgumentException> {
+                computeWebAuthnPrfFromHashedInput(cryptoGenerator, ByteArray(32), ByteArray(size))
+            }
+        }
+    }
+
+    @Test
+    fun `PRF input and output buffers are cleared on success and encoding failure`() {
+        for (encodingFails in listOf(false, true)) {
+            val input = byteArrayOf(1, 2, 3)
+            val output = ByteArray(32) { 7 }
+            val operation = {
+                computeAndEncodePasskeyPrf(
+                    prfSecretBytes = ByteArray(32),
+                    prfInputBase64 = "input",
+                    computePrf = { _, _ -> output },
+                    decodeInput = { input },
+                    encodeOutput = { if (encodingFails) error("Encoding failed") else "output" },
+                )
+            }
+            if (encodingFails) assertFailsWith<IllegalStateException> { operation() } else assertEquals("output", operation())
+            assertContentEquals(ByteArray(input.size), input)
+            assertContentEquals(ByteArray(output.size), output)
+        }
+    }
+
+    @Test
+    fun `PRF input is cleared when computation fails`() {
+        val input = byteArrayOf(1, 2, 3)
+        assertFailsWith<IllegalStateException> {
+            computeAndEncodePasskeyPrf(
+                prfSecretBytes = ByteArray(32),
+                prfInputBase64 = "input",
+                computePrf = { _, _ -> error("Computation failed") },
+                decodeInput = { input },
+                encodeOutput = { error("Must not encode") },
+            )
+        }
+        assertContentEquals(ByteArray(input.size), input)
     }
 
     private fun requestJson(prfMembers: String): String =

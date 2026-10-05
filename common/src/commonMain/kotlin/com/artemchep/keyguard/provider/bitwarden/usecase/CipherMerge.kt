@@ -22,7 +22,6 @@ import com.artemchep.keyguard.common.model.lastName
 import com.artemchep.keyguard.common.model.licenseNumber
 import com.artemchep.keyguard.common.model.links
 import com.artemchep.keyguard.common.model.login
-import com.artemchep.keyguard.common.model.metadata
 import com.artemchep.keyguard.common.model.middleName
 import com.artemchep.keyguard.common.model.notes
 import com.artemchep.keyguard.common.model.passportNumber
@@ -30,9 +29,7 @@ import com.artemchep.keyguard.common.model.password
 import com.artemchep.keyguard.common.model.phone
 import com.artemchep.keyguard.common.model.postalCode
 import com.artemchep.keyguard.common.model.privateKey
-import com.artemchep.keyguard.common.model.privateKeyArmored
 import com.artemchep.keyguard.common.model.publicKey
-import com.artemchep.keyguard.common.model.publicKeyArmored
 import com.artemchep.keyguard.common.model.reprompt
 import com.artemchep.keyguard.common.model.sshKey
 import com.artemchep.keyguard.common.model.ssn
@@ -45,12 +42,11 @@ import com.artemchep.keyguard.common.model.uris
 import com.artemchep.keyguard.common.model.username
 import com.artemchep.keyguard.common.service.cipherlink.canonicalizeCipherLinkIds
 import com.artemchep.keyguard.common.usecase.CipherMerge
-import org.kodein.di.DirectDI
 
 /**
  * @author Artem Chepurnyi
  */
-class CipherMergeImpl() : CipherMerge {
+class CipherMergeImpl : CipherMerge {
     private val mergeRules = Node.Group<DSecret, DSecret>(
         lens = Lens<DSecret, DSecret, DSecret, DSecret>(
             get = { it },
@@ -138,14 +134,11 @@ class CipherMergeImpl() : CipherMerge {
                     Node.Leaf(DSecret.SshKey.fingerprint),
                 ),
             ),
-            Node.Group<DSecret, DSecret.GpgKey>(
+            // GPG public, private, fingerprint, and metadata fields describe
+            // one cryptographic object. Picking them independently can create
+            // a tuple that never existed on any replica.
+            Node.Leaf<DSecret, DSecret.GpgKey>(
                 lens = DSecret.gpgKey,
-                children = listOf(
-                    Node.Leaf(DSecret.GpgKey.privateKeyArmored),
-                    Node.Leaf(DSecret.GpgKey.publicKeyArmored),
-                    Node.Leaf(DSecret.GpgKey.fingerprint),
-                    Node.Leaf(DSecret.GpgKey.metadata),
-                ),
             ),
         ),
     )
@@ -242,8 +235,6 @@ class CipherMergeImpl() : CipherMerge {
     private class PickCardStrategy : PickStrategy<DSecret.Card> {
         override fun pick(list: List<DSecret.Card>): DSecret.Card = list.first()
     }
-
-    constructor(directDI: DirectDI) : this()
 
     override fun invoke(
         ciphers: List<DSecret>,

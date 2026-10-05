@@ -37,16 +37,14 @@ import com.artemchep.keyguard.common.service.text.Base64Service
 import com.artemchep.keyguard.platform.CurrentPlatform
 import com.artemchep.keyguard.platform.util.hasWatch
 import com.artemchep.keyguard.platform.util.isRelease
+import kotlin.time.Duration
+import kotlin.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
-import org.kodein.di.DirectDI
-import org.kodein.di.instance
-import kotlin.time.Duration
-import kotlin.time.Instant
 
 /**
  * @author Artem Chepurnyi
@@ -89,6 +87,7 @@ class SettingsRepositoryImpl(
         private const val KEY_APP_ICONS = "app_icons"
         private const val KEY_WEBSITE_ICONS = "website_icons"
         private const val KEY_MARKDOWN = "markdown"
+        private const val KEY_WEBDAV_TRANSACTIONS = "webdav_transactions"
         private const val KEY_SSH_AGENT = "ssh_agent"
         private const val KEY_SSH_AGENT_APPROVAL_WINDOW = "ssh_agent.approval_window"
         private const val KEY_SSH_AGENT_APPROVAL_CACHE_POLICY = "ssh_agent.approval_cache_policy"
@@ -220,6 +219,9 @@ class SettingsRepositoryImpl(
 
     private val markdownPref =
         store.getBoolean(KEY_MARKDOWN, true)
+
+    private val webDavTransactionsPref =
+        store.getBoolean(KEY_WEBDAV_TRANSACTIONS, true)
 
     private val sshAgentPref =
         store.getBoolean(KEY_SSH_AGENT, false)
@@ -562,6 +564,7 @@ class SettingsRepositoryImpl(
             appIconsPref,
             websiteIconsPref,
             markdownPref,
+            webDavTransactionsPref,
             sshAgentPref,
             sshAgentApprovalWindowPref,
             sshAgentApprovalCachePolicyPref,
@@ -596,12 +599,6 @@ class SettingsRepositoryImpl(
             versionLogPref,
         )
     }
-
-    constructor(directDI: DirectDI) : this(
-        store = directDI.instance<Files, KeyValueStore>(arg = Files.SETTINGS),
-        json = directDI.instance(),
-        base64Service = directDI.instance(),
-    )
 
     override fun getPrefs(
         includeInternalPrefs: Boolean,
@@ -818,6 +815,11 @@ class SettingsRepositoryImpl(
         .setAndCommit(markdown)
 
     override fun getMarkdown() = markdownPref
+
+    override fun setWebDavTransactions(webDavTransactions: Boolean) = webDavTransactionsPref
+        .setAndCommit(webDavTransactions)
+
+    override fun getWebDavTransactions() = webDavTransactionsPref
 
     override fun setSshAgent(sshAgent: Boolean) = sshAgentPref
         .setAndCommit(sshAgent)

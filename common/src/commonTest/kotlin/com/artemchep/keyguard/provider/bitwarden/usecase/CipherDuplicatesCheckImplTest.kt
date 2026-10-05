@@ -6,6 +6,7 @@ import com.artemchep.keyguard.common.model.DSecret
 import com.artemchep.keyguard.common.service.crypto.CryptoGenerator
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadata
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadataKey
+import com.artemchep.keyguard.test.gpgMetadata
 import com.artemchep.keyguard.common.service.logging.LogLevel
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.similarity.SimilarityService
@@ -23,6 +24,20 @@ class CipherDuplicatesCheckImplTest {
         similarityService = DuplicateTestSimilarityService,
         logRepository = DuplicateTestLogRepository,
     )
+
+    @Test
+    fun `archived and trashed items are excluded from duplicate groups until restored`() {
+        val active = gpgSecret(id = "active", name = "Key")
+        val archived = active.copy(id = "archived", archivedDate = TEST_INSTANT)
+        val trashed = active.copy(id = "trashed", deletedDate = TEST_INSTANT)
+
+        assertEquals(emptyList(), duplicatesCheck(listOf(active, archived, trashed)))
+        assertEquals(
+            setOf("active", "archived"),
+            duplicatesCheck(listOf(active, archived.copy(archivedDate = null), trashed))
+                .single().ciphers.map { it.id }.toSet(),
+        )
+    }
 
     @Test
     fun `gpg keys with same normalized fingerprint are duplicates despite different names`() {
@@ -101,13 +116,11 @@ class CipherDuplicatesCheckImplTest {
     }
 
     @Test
-    fun `gpg keys with same metadata key identity are duplicates when key material is missing`() {
-        val metadata = GpgAgentKeyMetadata(
-            keys = listOf(
-                GpgAgentKeyMetadataKey(
+    fun `derived gpg metadata does not make keys duplicates when key material is missing`() {
+        val metadata = gpgMetadata(
+            GpgAgentKeyMetadataKey(
                     keygrip = "keygrip-a",
                     fingerprint = "d0bb cfbb 250d 3bb0 658e 5384 f83d 947d 29ef ecf7",
-                ),
             ),
         )
         val groups = duplicatesCheck(
@@ -131,11 +144,7 @@ class CipherDuplicatesCheckImplTest {
             ),
         )
 
-        assertEquals(1, groups.size)
-        assertEquals(
-            setOf("first", "second"),
-            groups.single().ciphers.map { it.id }.toSet(),
-        )
+        assertEquals(emptyList(), groups)
     }
 
     @Test

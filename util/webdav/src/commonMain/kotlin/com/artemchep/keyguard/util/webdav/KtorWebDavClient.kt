@@ -168,6 +168,7 @@ class KtorWebDavClient(
             method = HttpMethod.Get,
             block = {
                 header(HEADER_ACCEPT_ENCODING, "identity")
+                header(HttpHeaders.CacheControl, "no-cache, no-store")
                 if (useConditionalGet) {
                     metadata.etag
                         ?.takeIf { etag -> etag.isStrongEtag() }
@@ -526,11 +527,12 @@ class KtorWebDavClient(
          * writes can degrade from a rejected ETag condition after that check,
          * while Create writes always retain their no-overwrite condition.
          * Servers without MOVE fail unless this client explicitly allows a
-         * direct PUT fallback, which loses atomic replacement. Only a
-         * server-enforced condition closes the race between the final check
-         * and the swap; on servers that
-         * ignore conditions a concurrent edit inside that window can still
-         * be overwritten. The `write` callback may be invoked more than once
+         * direct PUT fallback, which loses atomic replacement; a DirectPut
+         * client skips the temporary upload and MOVE and always writes with
+         * that conditional PUT. Only a server-enforced condition closes the
+         * race between the final check and the swap; on servers that ignore
+         * conditions a concurrent edit inside that window can still be
+         * overwritten. The `write` callback may be invoked more than once
          * when the flow degrades, so it must produce the payload again.
          */
         ensureDestinationMatchesPrecondition(
@@ -538,7 +540,7 @@ class KtorWebDavClient(
             mode = mode,
             precondition = precondition,
         )
-        if (!moveUnsupported) {
+        if (writeStrategy != WebDavWriteStrategy.DirectPut && !moveUnsupported) {
             val published = publishViaTempMove(
                 path = objectPath,
                 mode = mode,
@@ -722,7 +724,11 @@ class KtorWebDavClient(
         response: HttpResponse,
         sourcePath: String,
     ) {
+        // The temp sibling lives in the destination's own parent, so a 409
+        // cannot mean missing intermediate collections here; servers that
+        // answer MOVE with it are refusing the method itself.
         if (response.status.value == STATUS_METHOD_NOT_ALLOWED ||
+            response.status.value == STATUS_CONFLICT ||
             response.status.value == STATUS_NOT_IMPLEMENTED
         ) {
             throw MoveNotSupportedException(response.status.value)
@@ -1061,36 +1067,26 @@ class KtorWebDavClient(
         operation: WebDavOperation,
         path: String,
     ): Source {
-        val upstream = try {
+        val upstream = mapTransportException(operation, path) {
             bodyAsChannel().asSource()
-        } catch (e: WebDavException) {
-            throw e
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw WebDavException.Transient(
-                operation = operation,
-                path = path,
-                cause = e,
-            )
         }
         return object : RawSource {
             override fun readAtMostTo(
                 sink: Buffer,
                 byteCount: Long,
-            ): Long = mapStreamingException(operation, path) {
+            ): Long = mapTransportException(operation, path) {
                 upstream.readAtMostTo(sink, byteCount)
             }
 
             override fun close() {
-                mapStreamingException(operation, path) {
+                mapTransportException(operation, path) {
                     upstream.close()
                 }
             }
         }.buffered()
     }
 
-    private inline fun <T> mapStreamingException(
+    private inline fun <T> mapTransportException(
         operation: WebDavOperation,
         path: String?,
         block: () -> T,
@@ -1378,22 +1374,12 @@ class KtorWebDavClient(
         url: String,
         method: HttpMethod,
         block: HttpRequestBuilder.() -> Unit = {},
-    ): HttpResponse = try {
+    ): HttpResponse = mapTransportException(operation, path) {
         httpClient.request(url) {
             this.method = method
             applyCommonHeaders()
             block()
         }
-    } catch (e: WebDavException) {
-        throw e
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        throw WebDavException.Transient(
-            operation = operation,
-            path = path,
-            cause = e,
-        )
     }
 
     private fun HttpRequestBuilder.applyCommonHeaders() {
@@ -1421,18 +1407,8 @@ class KtorWebDavClient(
     private suspend fun HttpResponse.bodyAsWebDavText(
         operation: WebDavOperation,
         path: String,
-    ): String = try {
+    ): String = mapTransportException(operation, path.ifEmpty { null }) {
         bodyAsText()
-    } catch (e: WebDavException) {
-        throw e
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        throw WebDavException.Transient(
-            operation = operation,
-            path = path.ifEmpty { null },
-            cause = e,
-        )
     }
 
     private fun String.toMultiStatus(
@@ -1475,10 +1451,13 @@ class KtorWebDavClient(
             )
         }
 
-        val properties = propStats
-            .filter { propStat -> propStat.statusCode == null || propStat.statusCode in 200..299 }
-            .flatMap { propStat -> propStat.properties.entries }
-            .associate { (key, value) -> key to value }
+        val properties = buildMap {
+            propStats.forEach { propStat ->
+                if (propStat.statusCode == null || propStat.statusCode in 200..299) {
+                    putAll(propStat.properties)
+                }
+            }
+        }
         val resourceType = properties[WebDavXml.RESOURCETYPE]
         val isCollection = resourceType
             ?.children
@@ -1624,6 +1603,7 @@ class KtorWebDavClient(
         private const val STATUS_UNAUTHORIZED = 401
         private const val STATUS_NOT_FOUND = 404
         private const val STATUS_METHOD_NOT_ALLOWED = 405
+        private const val STATUS_CONFLICT = 409
         private const val STATUS_PRECONDITION_FAILED = 412
         private const val STATUS_RANGE_NOT_SATISFIABLE = 416
         private const val STATUS_TOO_MANY_REQUESTS = 429

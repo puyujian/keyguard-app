@@ -7,6 +7,7 @@ import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.request.headers
 import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.URLBuilder
 import io.ktor.http.appendPathSegments
@@ -25,9 +26,7 @@ internal suspend fun negotiate(
     val headersWithAccessToken = options.accessTokenProvider
         ?.invoke()
         ?.let { accessToken ->
-            options.headers.toMutableMap().apply {
-                this["Authorization"] = "Bearer $accessToken"
-            }
+            options.headers.withAccessToken(accessToken)
         }
         ?: options.headers
 
@@ -69,9 +68,7 @@ private suspend fun startNegotiate(
 
         val newHeaders = response.accessToken
             ?.let { token ->
-                headers.toMutableMap().apply {
-                    put("Authorization", "Bearer $token")
-                }
+                headers.withAccessToken(token)
             }
             ?: headers
 
@@ -93,33 +90,34 @@ private suspend fun startNegotiate(
         throw IllegalStateException("There were no compatible transports on the server.")
     }
 
-    if (response.connectionId == null) {
-        throw IllegalStateException("Missing required property 'connectionId'.")
-    }
-    if (response.negotiateVersion > 0 && response.connectionToken == null) {
-        throw IllegalStateException("Missing required property 'connectionToken'.")
-    }
-
+    val connectionId = response.connectionId
+        ?: throw IllegalStateException("Missing required property 'connectionId'.")
     val id = if (response.negotiateVersion > 0) {
         response.connectionToken
+            ?: throw IllegalStateException("Missing required property 'connectionToken'.")
     } else {
-        response.connectionId
+        connectionId
     }
-    val connectionId = response.connectionId
-
-    val finalUrl = if (id != null) {
-        URLBuilder(url)
-            .apply { parameters.append("id", id) }
-            .buildString()
-    } else {
-        url
-    }
+    val finalUrl = URLBuilder(url)
+        .apply { parameters.append("id", id) }
+        .buildString()
 
     return HubNegotiation(
         url = finalUrl,
         headers = headers,
         connectionId = connectionId,
     )
+}
+
+private fun Map<String, String>.withAccessToken(
+    token: String,
+): Map<String, String> = buildMap {
+    this@withAccessToken.forEach { (key, value) ->
+        if (!key.equals(HttpHeaders.Authorization, ignoreCase = true)) {
+            put(key, value)
+        }
+    }
+    put(HttpHeaders.Authorization, "Bearer $token")
 }
 
 private suspend fun handleNegotiate(

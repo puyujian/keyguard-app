@@ -11,6 +11,85 @@ import kotlin.test.assertNull
 
 class AgentCallerAuthorizationTest {
     @Test
+    fun `Windows snapshots reuse the selected scope across connections`() {
+        val process = processSubject().copy(
+            evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.WINDOWS_PROCESS_SNAPSHOT,
+        )
+        val app = applicationInstanceSubject().copy(
+            evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.WINDOWS_APPLICATION_SNAPSHOT,
+        )
+        val first = sshCaller(subjects = listOf(process, app))
+        val reconnect = sshCaller(connectionFingerprint = fingerprint(10), subjects = listOf(process, app))
+        val sibling = sshCaller(
+            connectionFingerprint = fingerprint(11),
+            subjects = listOf(process.copy(fingerprint = fingerprint(12)), app),
+        )
+
+        assertNotEquals(
+            first.toApprovalCacheIdentity(AgentApprovalCachePolicy.Connection),
+            reconnect.toApprovalCacheIdentity(AgentApprovalCachePolicy.Connection),
+        )
+        assertEquals(
+            first.toApprovalCacheIdentity(AgentApprovalCachePolicy.Process),
+            reconnect.toApprovalCacheIdentity(AgentApprovalCachePolicy.Process),
+        )
+        assertNotEquals(
+            first.toApprovalCacheIdentity(AgentApprovalCachePolicy.Process),
+            sibling.toApprovalCacheIdentity(AgentApprovalCachePolicy.Process),
+        )
+        listOf(AgentApprovalCachePolicy.Application, AgentApprovalCachePolicy.ApplicationAndTerminalSession)
+            .forEach { policy ->
+                val identity = assertNotNull(first.toApprovalCacheIdentity(policy))
+                assertEquals(
+                    AgentApprovalCacheIdentity.EvidenceSource.WindowsApplicationSnapshot,
+                    identity.evidenceSource,
+                )
+                assertEquals(identity, sibling.toApprovalCacheIdentity(policy))
+                assertNotEquals(
+                    identity,
+                    sshCaller(subjects = listOf(process, app.copy(fingerprint = fingerprint(13))))
+                        .toApprovalCacheIdentity(policy),
+                )
+                assertNotEquals(
+                    identity,
+                    sshCaller(subjects = listOf(process, app), authorizationContextFingerprint = fingerprint(14))
+                        .toApprovalCacheIdentity(policy),
+                )
+                assertEquals(
+                    AgentApprovalCacheIdentity.EvidenceSource.WindowsProcessSnapshot,
+                    sshCaller(subjects = listOf(process)).toApprovalCacheIdentity(policy)?.evidenceSource,
+                )
+            }
+    }
+
+    @Test
+    fun `Windows snapshots cannot claim a stable application or terminal session`() {
+        val sources = listOf(
+            AgentCallerAuthorizationSchema.EvidenceSource.WINDOWS_PROCESS_SNAPSHOT,
+            AgentCallerAuthorizationSchema.EvidenceSource.WINDOWS_APPLICATION_SNAPSHOT,
+        )
+        val kinds = listOf(
+            AgentCallerAuthorizationSchema.SubjectKind.PROCESS,
+            AgentCallerAuthorizationSchema.SubjectKind.APPLICATION_INSTANCE,
+            AgentCallerAuthorizationSchema.SubjectKind.STABLE_APPLICATION,
+            AgentCallerAuthorizationSchema.SubjectKind.TERMINAL_SESSION,
+        )
+        sources.forEach { source ->
+            kinds.forEach { kind ->
+                val identity = sshCaller(subjects = listOf(
+                    CallerAuthorizationSubject(kind = kind, evidenceSource = source, fingerprint = fingerprint(2)),
+                )).toApprovalCacheIdentity()
+                val supported = when (source) {
+                    AgentCallerAuthorizationSchema.EvidenceSource.WINDOWS_PROCESS_SNAPSHOT ->
+                        kind == AgentCallerAuthorizationSchema.SubjectKind.PROCESS
+                    else -> kind == AgentCallerAuthorizationSchema.SubjectKind.APPLICATION_INSTANCE
+                }
+                assertEquals(supported, identity != null)
+            }
+        }
+    }
+
+    @Test
     fun `cache policy storage keys are stable and unknown persisted values fail closed`() {
         AgentApprovalCachePolicy.entries.forEach { policy ->
             assertEquals(policy, AgentApprovalCachePolicy.fromStorageKey(policy.storageKey))
@@ -136,6 +215,64 @@ class AgentCallerAuthorizationTest {
             AgentApprovalCacheIdentity.CacheSubject.Kind.Process,
             process?.cacheSubject?.kind,
         )
+    }
+
+    @Test
+    fun `macos joint proof exports select only the available authorization subjects`() {
+        val process = processSubject().copy(
+            evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.MACOS_AUDIT_TOKEN,
+        )
+        val terminal = terminalSessionSubject().copy(
+            evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.MACOS_TERMINAL_SESSION,
+        )
+        val applications = listOf(
+            stableApplicationSubject().copy(
+                evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.MACOS_CODE_SIGNING,
+            ),
+            applicationInstanceSubject().copy(
+                evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.MACOS_APPLICATION_ANCESTRY,
+            ),
+        )
+
+        applications.forEach { application ->
+            val caller = sshCaller(subjects = listOf(process, terminal, application))
+            assertEquals(
+                AgentApprovalCacheIdentity.CacheSubject.Kind.TerminalSession,
+                caller.toApprovalCacheIdentity()?.cacheSubject?.kind,
+            )
+            assertEquals(
+                application.fingerprint.toHex(),
+                caller.toApprovalCacheIdentity(AgentApprovalCachePolicy.Application)
+                    ?.cacheSubject?.fingerprintHex,
+            )
+        }
+
+        val withoutApplication = sshCaller(subjects = listOf(process, terminal))
+        listOf(AgentApprovalCachePolicy.Default, AgentApprovalCachePolicy.Application).forEach { policy ->
+            assertEquals(
+                AgentApprovalCacheIdentity.CacheSubject.Kind.TerminalSession,
+                withoutApplication.toApprovalCacheIdentity(policy)?.cacheSubject?.kind,
+            )
+        }
+    }
+
+    @Test
+    fun `verified application label cannot broaden process-only macos authorization`() {
+        val caller = sshCaller(
+            appName = "iTerm2",
+            subjects = listOf(
+                processSubject().copy(
+                    evidenceSource = AgentCallerAuthorizationSchema.EvidenceSource.MACOS_AUDIT_TOKEN,
+                ),
+            ),
+        )
+
+        listOf(AgentApprovalCachePolicy.Default, AgentApprovalCachePolicy.Application).forEach { policy ->
+            assertEquals(
+                AgentApprovalCacheIdentity.CacheSubject.Kind.Process,
+                caller.toApprovalCacheIdentity(policy)?.cacheSubject?.kind,
+            )
+        }
     }
 
     @Test

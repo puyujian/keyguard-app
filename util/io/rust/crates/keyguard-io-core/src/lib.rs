@@ -42,6 +42,8 @@ pub mod sweep;
 pub mod txn;
 
 #[cfg(windows)]
+pub mod windows_file;
+#[cfg(windows)]
 mod windows_nt;
 #[cfg(windows)]
 mod winfs;
@@ -50,8 +52,6 @@ mod winfs;
 mod crash_tests;
 #[cfg(test)]
 mod simfs;
-
-use std::sync::Once;
 
 pub use directory::{AtomicDirectory, RelativeDestination};
 pub use durability::{AchievedSyncLevel, SyncLevel, SyncPolicy, SyncPolicyError};
@@ -69,25 +69,7 @@ pub use txn::{
 /// Version of the direct native function ABI.
 pub const ABI_VERSION: u32 = 1;
 
-/// Reserved error code returned for an invalid native ABI argument.
-pub const BRIDGE_ERROR_INVALID_ARGUMENT: u32 = 1;
-
-/// Reserved error code returned when a panic reaches a native ABI boundary.
-pub const BRIDGE_ERROR_PANIC: u32 = 2;
-
-/// Reserved error code returned when a native ABI adapter fails internally.
-pub const BRIDGE_ERROR_INTERNAL: u32 = 3;
+pub use keyguard_ffi::{BRIDGE_ERROR_INTERNAL, BRIDGE_ERROR_INVALID_ARGUMENT, BRIDGE_ERROR_PANIC};
 
 /// Reserved error code returned for an unknown or consumed native handle.
 pub const BRIDGE_ERROR_UNKNOWN_HANDLE: u32 = 4;
-
-static PANIC_HOOK: Once = Once::new();
-
-/// Installs a process-wide panic hook that does not disclose paths or file data.
-///
-/// Rust's default hook prints panic payloads before [`std::panic::catch_unwind`]
-/// runs. Native bridges install this hook before entering their panic boundary
-/// and communicate only stable status codes to Kotlin.
-pub fn install_redacting_panic_hook() {
-    PANIC_HOOK.call_once(|| std::panic::set_hook(Box::new(|_| {})));
-}

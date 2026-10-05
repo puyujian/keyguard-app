@@ -9,7 +9,7 @@ pub struct NativeRequest {
     pub protocol_version: u32,
     #[prost(
         oneof = "native_request::Operation",
-        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52"
+        tags = "10, 11, 12, 13, 15, 16, 17, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 54, 55, 57, 58, 59"
     )]
     pub operation: ::core::option::Option<native_request::Operation>,
 }
@@ -25,8 +25,6 @@ pub mod native_request {
         Argon2(super::Argon2Request),
         #[prost(message, tag = "13")]
         RandomBytes(super::RandomBytesRequest),
-        #[prost(message, tag = "14")]
-        RandomInt(super::RandomIntRequest),
         #[prost(message, tag = "15")]
         Hmac(super::HmacRequest),
         #[prost(message, tag = "16")]
@@ -35,14 +33,10 @@ pub mod native_request {
         AesEcbNoPaddingEncrypt(super::AesEcbNoPaddingEncryptRequest),
         #[prost(message, tag = "18")]
         AesCbcPkcs7(super::AesCbcPkcs7Request),
-        #[prost(message, tag = "19")]
-        RandomInts(super::RandomIntsRequest),
         #[prost(message, tag = "20")]
         AesEcbNoPaddingTransform(super::AesEcbNoPaddingTransformRequest),
         #[prost(message, tag = "21")]
         StreamCipherXorAtOffset(super::StreamCipherXorAtOffsetRequest),
-        #[prost(message, tag = "22")]
-        TwofishCbcPkcs7(super::TwofishCbcPkcs7Request),
         #[prost(message, tag = "23")]
         RsaOaepEncrypt(super::RsaOaepEncryptRequest),
         #[prost(message, tag = "24")]
@@ -59,8 +53,6 @@ pub mod native_request {
         SshKeyDescribe(super::SshKeyDescribeRequest),
         #[prost(message, tag = "30")]
         SshPrivateKeyRsaBits(super::SshPrivateKeyRsaBitsRequest),
-        #[prost(message, tag = "31")]
-        SshPrivateKeyFormat(super::SshPrivateKeyFormatRequest),
         #[prost(message, tag = "32")]
         SshAgentSign(super::SshAgentSignRequest),
         #[prost(message, tag = "33")]
@@ -101,7 +93,28 @@ pub mod native_request {
         SshKeyExportCxf(super::SshKeyExportCxfRequest),
         #[prost(message, tag = "52")]
         SshPublicKeyDecode(super::SshPublicKeyDecodeRequest),
+        #[prost(message, tag = "54")]
+        OpenPgpUserIdRevocation(super::OpenPgpUserIdRevocationRequest),
+        #[prost(message, tag = "55")]
+        OpenPgpUserIdReplacement(super::OpenPgpUserIdReplacementRequest),
+        #[prost(message, tag = "57")]
+        OpenPgpCertificateMaterialReconcileV2(
+            super::OpenPgpCertificateMaterialReconcileV2Request,
+        ),
+        #[prost(message, tag = "58")]
+        OpenPgpUserIdCertificationEvaluate(
+            super::OpenPgpUserIdCertificationEvaluateRequest,
+        ),
+        #[prost(message, tag = "59")]
+        OpenPgpStreamDrain(super::OpenPgpStreamDrainRequest),
     }
+}
+/// Ends a decryption session's input and returns one bounded output chunk.
+/// Repeat until bytes_value is empty, then stream_finish returns final metadata.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpStreamDrainRequest {
+    #[prost(uint64, tag = "1")]
+    pub handle: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NativeStreamOpenRequest {
@@ -109,7 +122,7 @@ pub struct NativeStreamOpenRequest {
     pub protocol_version: u32,
     #[prost(
         oneof = "native_stream_open_request::Operation",
-        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
+        tags = "11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
     )]
     pub operation: ::core::option::Option<native_stream_open_request::Operation>,
 }
@@ -117,8 +130,6 @@ pub struct NativeStreamOpenRequest {
 pub mod native_stream_open_request {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Operation {
-        #[prost(message, tag = "10")]
-        HmacSha256(super::HmacSha256StreamOpenRequest),
         #[prost(message, tag = "11")]
         Digest(super::DigestStreamOpenRequest),
         #[prost(message, tag = "12")]
@@ -148,11 +159,6 @@ pub mod native_stream_open_request {
         #[prost(message, tag = "22")]
         OpenPgpClearVerify(super::OpenPgpClearVerifyStreamOpenRequest),
     }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct HmacSha256StreamOpenRequest {
-    #[prost(bytes = "vec", tag = "1")]
-    pub key: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct DigestStreamOpenRequest {
@@ -256,25 +262,6 @@ pub struct RandomBytesRequest {
     #[prost(uint32, tag = "1")]
     pub length: u32,
 }
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct RandomIntRequest {
-    /// False returns an arbitrary signed 32-bit value. True returns [0, bound).
-    #[prost(bool, tag = "1")]
-    pub bounded: bool,
-    #[prost(uint32, tag = "2")]
-    pub exclusive_upper_bound: u32,
-}
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct RandomIntsRequest {
-    /// False returns arbitrary signed 32-bit values. True returns values in [0, bound).
-    #[prost(bool, tag = "1")]
-    pub bounded: bool,
-    #[prost(uint32, tag = "2")]
-    pub exclusive_upper_bound: u32,
-    /// Batched calls are limited to 1024 values.
-    #[prost(uint32, tag = "3")]
-    pub count: u32,
-}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HmacRequest {
     #[prost(enumeration = "HashAlgorithm", tag = "1")]
@@ -368,17 +355,6 @@ pub struct StreamCipherXorAtOffsetRequest {
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TwofishCbcPkcs7Request {
-    #[prost(enumeration = "CipherDirection", tag = "1")]
-    pub direction: i32,
-    #[prost(bytes = "vec", tag = "2")]
-    pub key: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "3")]
-    pub iv: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "4")]
-    pub data: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RsaOaepDecryptRequest {
     #[prost(enumeration = "RsaOaepHash", tag = "1")]
     pub hash: i32,
@@ -441,13 +417,6 @@ pub struct SshKeyDescribeRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SshPrivateKeyRsaBitsRequest {
     #[prost(bytes = "vec", tag = "1")]
-    pub private_key: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SshPrivateKeyFormatRequest {
-    #[prost(enumeration = "SshKeyType", tag = "1")]
-    pub r#type: i32,
-    #[prost(bytes = "vec", tag = "2")]
     pub private_key: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -573,12 +542,6 @@ pub struct SshKeyDescription {
 }
 /// Domain payload returned inside NativeResponse.bytes_value.
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SshFormattedPrivateKey {
-    #[prost(string, tag = "1")]
-    pub value: ::prost::alloc::string::String,
-}
-/// Domain payload returned inside NativeResponse.bytes_value.
-#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SshSignature {
     #[prost(string, tag = "1")]
     pub algorithm: ::prost::alloc::string::String,
@@ -631,13 +594,41 @@ pub mod ssh_private_key_import_result {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpPublicKeyParseRequest {
-    /// ASCII-armored or binary transferable public keys.
+    /// ASCII-armored or binary transferable public certificates, or exactly one
+    /// transferable secret certificate to parse as its public projection.
     #[prost(bytes = "vec", tag = "1")]
     pub key_data: ::prost::alloc::vec::Vec<u8>,
     /// Supplying the policy time makes expiry decisions deterministic. When
     /// absent, the native library uses the current wall-clock second.
     #[prost(uint64, optional, tag = "2")]
     pub reference_time_epoch_seconds: ::core::option::Option<u64>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificationAuthority {
+    /// A public-key document that contains the explicitly selected primary key.
+    #[prost(bytes = "vec", tag = "1")]
+    pub public_key: ::prost::alloc::vec::Vec<u8>,
+    /// Only this primary key is trusted, even when the document is a keyring.
+    #[prost(string, tag = "2")]
+    pub primary_fingerprint: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdCertificationEvaluateRequest {
+    /// Exactly one target certificate, encoded as ASCII armor or binary packets.
+    #[prost(bytes = "vec", tag = "1")]
+    pub public_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(message, repeated, tag = "2")]
+    pub authorities: ::prost::alloc::vec::Vec<OpenPgpCertificationAuthority>,
+    #[prost(uint64, optional, tag = "3")]
+    pub reference_time_epoch_seconds: ::core::option::Option<u64>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdCertificationEvaluateResult {
+    /// Exact User ID packet bodies authenticated by the target certificate and
+    /// certified by at least one currently usable trusted authority. Consumers
+    /// that expose text must decode UTF-8 strictly.
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub confirmed_user_ids: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpVerifyRequest {
@@ -726,6 +717,12 @@ pub struct OpenPgpPublicSubKeyInfo {
     pub created_at_epoch_seconds: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "10")]
     pub expires_at_epoch_seconds: ::core::option::Option<u64>,
+    /// True when a policy-acceptable binding signature authenticates this subkey.
+    /// A false value with a present subkey means the binding verified only under a
+    /// hash algorithm below policy: the subkey authorizes nothing, but renewal can
+    /// reissue its binding with a modern hash.
+    #[prost(bool, tag = "11")]
+    pub authenticated: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpPublicKeyInfo {
@@ -757,11 +754,47 @@ pub struct OpenPgpPublicKeyInfo {
     pub public_key_armored: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "14")]
     pub subkeys: ::prost::alloc::vec::Vec<OpenPgpPublicSubKeyInfo>,
+    #[prost(message, repeated, tag = "15")]
+    pub user_id_details: ::prost::alloc::vec::Vec<OpenPgpUserIdInfo>,
+    /// Complete key-component index for resolving external certificate references.
+    #[prost(string, repeated, tag = "16")]
+    pub component_fingerprints: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Fingerprints from cryptographically self-authenticated Revocation Key declarations.
+    #[prost(string, repeated, tag = "17")]
+    pub revocation_authority_fingerprints: ::prost::alloc::vec::Vec<
+        ::prost::alloc::string::String,
+    >,
+    /// True when a policy-acceptable self-signature authenticates the primary key.
+    /// See OpenPgpPublicSubKeyInfo.authenticated for the false case.
+    #[prost(bool, tag = "18")]
+    pub authenticated: bool,
+    /// Whether recertification may reissue the primary key's own self-signatures.
+    ///
+    /// This disambiguates `authenticated == false`: TEMPLATE_ONLY means the key is
+    /// bound only by weak-hash self-signatures that a renewal replaces, while NONE
+    /// means no renewal can repair it (no verified self-signature at all, or the
+    /// key is revoked). Subkeys carry no such field: an unauthenticated subkey is
+    /// only reported when it is template-renewable, so the state cannot arise.
+    #[prost(enumeration = "OpenPgpRenewalAuthorization", tag = "19")]
+    pub renewal: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdInfo {
+    #[prost(string, tag = "1")]
+    pub identity_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpPublicKeyParseSuccess {
     #[prost(message, repeated, tag = "1")]
     pub keys: ::prost::alloc::vec::Vec<OpenPgpPublicKeyInfo>,
+    /// Independent certificate entries omitted because Keyguard cannot represent
+    /// their key version, the entry is malformed, or its policy evaluation exceeds
+    /// the per-certificate work budget. One bad entry never invalidates later
+    /// recoverable entries.
+    #[prost(uint32, tag = "2")]
+    pub skipped_certificates: u32,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OpenPgpPublicKeyParseError {
@@ -797,29 +830,94 @@ pub struct OpenPgpVerification {
     pub created_at_epoch_seconds: ::core::option::Option<u64>,
     #[prost(enumeration = "OpenPgpVerificationWarning", repeated, tag = "6")]
     pub warnings: ::prost::alloc::vec::Vec<i32>,
+    #[prost(string, optional, tag = "7")]
+    pub primary_fingerprint: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "8")]
+    pub primary_user_id: ::core::option::Option<::prost::alloc::string::String>,
+    /// One leaf result for every signature packet in input order. The top-level
+    /// fields retain the compatibility aggregate (any valid signature wins),
+    /// while these entries prevent invalid or missing-key signatures from being
+    /// hidden by another valid signature. Leaf entries do not nest results.
+    #[prost(message, repeated, tag = "9")]
+    pub signatures: ::prost::alloc::vec::Vec<OpenPgpVerification>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct OpenPgpKeyMetadataKey {
+pub struct OpenPgpKeyComponentIndexV2 {
     #[prost(string, tag = "1")]
-    pub keygrip: ::prost::alloc::string::String,
+    pub fingerprint: ::prost::alloc::string::String,
+    #[prost(enumeration = "OpenPgpKeyComponentRole", tag = "2")]
+    pub role: i32,
+    #[prost(uint32, tag = "3")]
+    pub public_key_algorithm_id: u32,
+    #[prost(string, tag = "4")]
+    pub algorithm: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "5")]
+    pub keygrips: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag = "6")]
+    pub stored_secret_material: bool,
+    #[prost(enumeration = "OpenPgpAgentOperation", repeated, tag = "7")]
+    pub agent_operations: ::prost::alloc::vec::Vec<i32>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpLegacyDesignatedRevokerV2 {
+    #[prost(uint32, tag = "1")]
+    pub public_key_algorithm_id: u32,
     #[prost(string, tag = "2")]
     pub fingerprint: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub algorithm: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag = "4")]
-    pub capabilities: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(uint32, tag = "3")]
+    pub key_class: u32,
+    #[prost(bool, tag = "4")]
+    pub sensitive: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct OpenPgpKeyMetadata {
-    #[prost(uint32, tag = "1")]
-    pub version: u32,
+pub struct OpenPgpCertificateIndexV2 {
+    #[prost(string, tag = "1")]
+    pub primary_fingerprint: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
-    pub keys: ::prost::alloc::vec::Vec<OpenPgpKeyMetadataKey>,
+    pub components: ::prost::alloc::vec::Vec<OpenPgpKeyComponentIndexV2>,
+    /// Legacy RFC 4880 Revocation Key declarations. These are discovery hints,
+    /// not revocation evidence. Sensitive declarations must never be fetched.
+    #[prost(message, repeated, tag = "3")]
+    pub legacy_designated_revokers: ::prost::alloc::vec::Vec<
+        OpenPgpLegacyDesignatedRevokerV2,
+    >,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpComponentPolicyV2 {
+    #[prost(string, tag = "1")]
+    pub fingerprint: ::prost::alloc::string::String,
+    /// Uses approved for newly created data at evaluated_at_epoch_seconds.
+    #[prost(enumeration = "OpenPgpPolicyUse", repeated, tag = "2")]
+    pub allowed_new_data_uses: ::prost::alloc::vec::Vec<i32>,
+    /// Whether recertification may reissue this component's self-signatures.
+    #[prost(enumeration = "OpenPgpRenewalAuthorization", tag = "3")]
+    pub renewal: i32,
+    /// Transient policy output; never part of the persisted certificate index.
+    #[prost(enumeration = "OpenPgpRevocationStatus", tag = "4")]
+    pub revocation_status: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateResolutionV2 {
+    #[prost(message, optional, tag = "1")]
+    pub index: ::core::option::Option<OpenPgpCertificateIndexV2>,
+    /// Transient policy output. Callers must not persist this list.
+    #[prost(message, repeated, tag = "2")]
+    pub policy: ::prost::alloc::vec::Vec<OpenPgpComponentPolicyV2>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpMetadataResolutionV2 {
+    #[prost(uint64, tag = "1")]
+    pub evaluated_at_epoch_seconds: u64,
+    #[prost(uint32, tag = "2")]
+    pub policy_revision: u32,
+    /// One result per primary certificate; component selectors return their owner.
+    #[prost(message, repeated, tag = "3")]
+    pub certificates: ::prost::alloc::vec::Vec<OpenPgpCertificateResolutionV2>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpMetadataResolveResult {
-    #[prost(message, optional, tag = "1")]
-    pub metadata: ::core::option::Option<OpenPgpKeyMetadata>,
+    #[prost(message, optional, tag = "2")]
+    pub resolution: ::core::option::Option<OpenPgpMetadataResolutionV2>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpKeyGenerateRequest {
@@ -832,9 +930,11 @@ pub struct OpenPgpKeyGenerateRequest {
     pub rsa_bits: u32,
     #[prost(uint64, tag = "4")]
     pub creation_time_epoch_seconds: u64,
-    /// OpenPGP v4 stores this as an unsigned duration from creation time.
+    /// Both supported versions store an unsigned duration from creation time.
     #[prost(uint32, optional, tag = "5")]
     pub expiration_seconds: ::core::option::Option<u32>,
+    #[prost(enumeration = "OpenPgpKeyVersion", tag = "6")]
+    pub version: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpKeyMaterial {
@@ -904,6 +1004,12 @@ pub struct OpenPgpSignRequest {
     pub signature_time_epoch_seconds: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "7")]
     pub reference_time_epoch_seconds: ::core::option::Option<u64>,
+    /// Advisory public certificates used only to authenticate designated
+    /// revocations while selecting the signing component.
+    #[prost(bytes = "vec", repeated, tag = "8")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpDetachedSignStreamOpenRequest {
@@ -917,6 +1023,10 @@ pub struct OpenPgpDetachedSignStreamOpenRequest {
     pub signature_time_epoch_seconds: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "5")]
     pub reference_time_epoch_seconds: ::core::option::Option<u64>,
+    #[prost(bytes = "vec", repeated, tag = "6")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpClearSignStreamOpenRequest {
@@ -928,6 +1038,10 @@ pub struct OpenPgpClearSignStreamOpenRequest {
     pub signature_time_epoch_seconds: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "4")]
     pub reference_time_epoch_seconds: ::core::option::Option<u64>,
+    #[prost(bytes = "vec", repeated, tag = "5")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpEncryptRequest {
@@ -950,6 +1064,12 @@ pub struct OpenPgpEncryptRequest {
     /// Absent preserves the historical behavior of compressing messages.
     #[prost(bool, optional, tag = "9")]
     pub enable_compression: ::core::option::Option<bool>,
+    /// Kept separate from public_keys: these certificates authorize revocations
+    /// and must never become message recipients.
+    #[prost(bytes = "vec", repeated, tag = "10")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpEncryptStreamOpenRequest {
@@ -970,6 +1090,10 @@ pub struct OpenPgpEncryptStreamOpenRequest {
     /// Absent preserves the historical behavior of compressing messages.
     #[prost(bool, optional, tag = "8")]
     pub enable_compression: ::core::option::Option<bool>,
+    #[prost(bytes = "vec", repeated, tag = "9")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpEncryptResult {
@@ -1013,6 +1137,10 @@ pub struct OpenPgpDecryptStreamOpenRequest {
     /// invalid input.
     #[prost(bool, optional, tag = "4")]
     pub allow_signed_only: ::core::option::Option<bool>,
+    /// Private directory for encrypted temporary staging of large legacy messages.
+    /// Absent preserves the bounded in-memory legacy decryption path.
+    #[prost(string, optional, tag = "5")]
+    pub staging_directory: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Header of the literal data packet. OpenPGP signatures cover only the
 /// literal data, never this header: for signed-only (unencrypted) messages
@@ -1056,6 +1184,11 @@ pub struct OpenPgpDecryptResult {
     pub decryption_key_fingerprint: ::core::option::Option<
         ::prost::alloc::string::String,
     >,
+    /// Deprecation warnings for the exact private component that successfully
+    /// recovered the message session key. Empty for signed-only input and failed
+    /// recovery attempts.
+    #[prost(enumeration = "OpenPgpDecryptionWarning", repeated, tag = "7")]
+    pub warnings: ::prost::alloc::vec::Vec<i32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpDecryptFinal {
@@ -1080,6 +1213,11 @@ pub struct OpenPgpDecryptFinal {
     pub decryption_key_fingerprint: ::core::option::Option<
         ::prost::alloc::string::String,
     >,
+    /// Deprecation warnings for the exact private component that successfully
+    /// recovered the message session key. Empty for signed-only input and failed
+    /// recovery attempts.
+    #[prost(enumeration = "OpenPgpDecryptionWarning", repeated, tag = "7")]
+    pub warnings: ::prost::alloc::vec::Vec<i32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpExpirationUpdateRequest {
@@ -1104,8 +1242,8 @@ pub struct OpenPgpExpirationUpdateRequest {
 pub struct OpenPgpExpirationUpdateSuccess {
     #[prost(message, optional, tag = "1")]
     pub key_material: ::core::option::Option<OpenPgpKeyMaterial>,
-    #[prost(message, optional, tag = "2")]
-    pub metadata: ::core::option::Option<OpenPgpKeyMetadata>,
+    #[prost(message, optional, tag = "3")]
+    pub certificate_index: ::core::option::Option<OpenPgpCertificateIndexV2>,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct OpenPgpExpirationUpdateError {
@@ -1127,6 +1265,225 @@ pub mod open_pgp_expiration_update_result {
         Error(super::OpenPgpExpirationUpdateError),
     }
 }
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialReconcileError {
+    #[prost(enumeration = "OpenPgpCertificateMaterialInputErrorReason", tag = "1")]
+    pub existing_public_input_error: i32,
+    #[prost(enumeration = "OpenPgpCertificateMaterialInputErrorReason", tag = "2")]
+    pub incoming_public_input_error: i32,
+    #[prost(enumeration = "OpenPgpCertificateMaterialInputErrorReason", tag = "3")]
+    pub existing_secret_input_error: i32,
+    #[prost(enumeration = "OpenPgpCertificateMaterialInputErrorReason", tag = "4")]
+    pub incoming_secret_input_error: i32,
+    #[prost(enumeration = "OpenPgpCertificateMaterialPairErrorReason", tag = "5")]
+    pub pair_error: i32,
+}
+/// V2 separates packet-preserving local state from ordinary transferable
+/// OpenPGP objects.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialReconcileV2Request {
+    #[prost(string, tag = "1")]
+    pub expected_primary_fingerprint: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", optional, tag = "2")]
+    pub existing_public_certificate: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(bytes = "vec", optional, tag = "3")]
+    pub incoming_public_certificate: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(bytes = "vec", optional, tag = "4")]
+    pub existing_secret_certificate: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(bytes = "vec", optional, tag = "5")]
+    pub incoming_secret_certificate: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialInputContribution {
+    #[prost(bool, tag = "1")]
+    pub present: bool,
+    #[prost(bool, tag = "2")]
+    pub unique_public_evidence: bool,
+    #[prost(bool, tag = "3")]
+    pub unique_secret_capability: bool,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialContributions {
+    #[prost(message, optional, tag = "1")]
+    pub existing_public: ::core::option::Option<
+        OpenPgpCertificateMaterialInputContribution,
+    >,
+    #[prost(message, optional, tag = "2")]
+    pub incoming_public: ::core::option::Option<
+        OpenPgpCertificateMaterialInputContribution,
+    >,
+    #[prost(message, optional, tag = "3")]
+    pub existing_secret: ::core::option::Option<
+        OpenPgpCertificateMaterialInputContribution,
+    >,
+    #[prost(message, optional, tag = "4")]
+    pub incoming_secret: ::core::option::Option<
+        OpenPgpCertificateMaterialInputContribution,
+    >,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialReconcileV2Success {
+    #[prost(bytes = "vec", tag = "1")]
+    pub local_public_material: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", optional, tag = "2")]
+    pub local_secret_material: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    #[prost(bytes = "vec", optional, tag = "3")]
+    pub transferable_public_certificate: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(bytes = "vec", optional, tag = "4")]
+    pub transferable_secret_key: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    #[prost(string, tag = "5")]
+    pub primary_fingerprint: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "6")]
+    pub contributions: ::core::option::Option<OpenPgpCertificateMaterialContributions>,
+    #[prost(
+        enumeration = "OpenPgpCertificateMaterialWithheldReason",
+        repeated,
+        tag = "7"
+    )]
+    pub withheld_reasons: ::prost::alloc::vec::Vec<i32>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpCertificateMaterialReconcileV2Result {
+    #[prost(
+        oneof = "open_pgp_certificate_material_reconcile_v2_result::Result",
+        tags = "1, 2"
+    )]
+    pub result: ::core::option::Option<
+        open_pgp_certificate_material_reconcile_v2_result::Result,
+    >,
+}
+/// Nested message and enum types in `OpenPgpCertificateMaterialReconcileV2Result`.
+pub mod open_pgp_certificate_material_reconcile_v2_result {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Result {
+        #[prost(message, tag = "1")]
+        Success(super::OpenPgpCertificateMaterialReconcileV2Success),
+        #[prost(message, tag = "2")]
+        Error(super::OpenPgpCertificateMaterialReconcileError),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdRevocationRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    pub private_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub public_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag = "3")]
+    pub expected_primary_fingerprint: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub identity_id: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", repeated, tag = "5")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(uint64, tag = "6")]
+    pub reference_time_epoch_seconds: u64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdRevocationSuccess {
+    #[prost(message, optional, tag = "1")]
+    pub key_material: ::core::option::Option<OpenPgpKeyMaterial>,
+    /// Minimal transferable certificate containing the revocation evidence.
+    /// Empty when unchanged or when the mutation is local-only.
+    #[prost(bytes = "vec", tag = "3")]
+    pub revocation_certificate_armored: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bool, tag = "4")]
+    pub changed: bool,
+    #[prost(uint64, tag = "5")]
+    pub effective_at_epoch_seconds: u64,
+    #[prost(message, optional, tag = "6")]
+    pub certificate_index: ::core::option::Option<OpenPgpCertificateIndexV2>,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdRevocationError {
+    #[prost(enumeration = "OpenPgpUserIdRevocationErrorReason", tag = "1")]
+    pub reason: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdRevocationResult {
+    #[prost(oneof = "open_pgp_user_id_revocation_result::Result", tags = "1, 2")]
+    pub result: ::core::option::Option<open_pgp_user_id_revocation_result::Result>,
+}
+/// Nested message and enum types in `OpenPgpUserIdRevocationResult`.
+pub mod open_pgp_user_id_revocation_result {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Result {
+        #[prost(message, tag = "1")]
+        Success(super::OpenPgpUserIdRevocationSuccess),
+        #[prost(message, tag = "2")]
+        Error(super::OpenPgpUserIdRevocationError),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdReplacementRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    pub private_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub public_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag = "3")]
+    pub expected_primary_fingerprint: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub old_identity_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub new_user_id: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", repeated, tag = "6")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
+    #[prost(uint64, tag = "7")]
+    pub reference_time_epoch_seconds: u64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdReplacementSuccess {
+    #[prost(message, optional, tag = "1")]
+    pub key_material: ::core::option::Option<OpenPgpKeyMaterial>,
+    /// Minimal transferable certificate containing both atomic statements.
+    /// Empty when unchanged or when the mutation is local-only.
+    #[prost(bytes = "vec", tag = "3")]
+    pub replacement_certificate_armored: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bool, tag = "4")]
+    pub changed: bool,
+    #[prost(uint64, tag = "5")]
+    pub effective_at_epoch_seconds: u64,
+    #[prost(string, tag = "6")]
+    pub old_identity_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub new_identity_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub primary_user_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "9")]
+    pub certificate_index: ::core::option::Option<OpenPgpCertificateIndexV2>,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdReplacementError {
+    #[prost(enumeration = "OpenPgpUserIdReplacementErrorReason", tag = "1")]
+    pub reason: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OpenPgpUserIdReplacementResult {
+    #[prost(oneof = "open_pgp_user_id_replacement_result::Result", tags = "1, 2")]
+    pub result: ::core::option::Option<open_pgp_user_id_replacement_result::Result>,
+}
+/// Nested message and enum types in `OpenPgpUserIdReplacementResult`.
+pub mod open_pgp_user_id_replacement_result {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Result {
+        #[prost(message, tag = "1")]
+        Success(super::OpenPgpUserIdReplacementSuccess),
+        #[prost(message, tag = "2")]
+        Error(super::OpenPgpUserIdReplacementError),
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpAgentSignRequest {
     #[prost(bytes = "vec", tag = "1")]
@@ -1137,6 +1494,10 @@ pub struct OpenPgpAgentSignRequest {
     pub hash_algorithm: ::prost::alloc::string::String,
     #[prost(bytes = "vec", tag = "4")]
     pub hash: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", repeated, tag = "5")]
+    pub candidate_revocation_keys: ::prost::alloc::vec::Vec<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OpenPgpAgentSignSuccess {
@@ -1575,6 +1936,9 @@ pub enum OpenPgpPublicKeyParseErrorReason {
     Empty = 1,
     Malformed = 2,
     UnsupportedKeyVersion = 3,
+    /// The document holds several secret certificates (for example a full
+    /// `gpg --export-secret-keys` dump); the operation accepts exactly one.
+    MultipleCertificates = 4,
 }
 impl OpenPgpPublicKeyParseErrorReason {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1589,6 +1953,9 @@ impl OpenPgpPublicKeyParseErrorReason {
             Self::UnsupportedKeyVersion => {
                 "OPEN_PGP_PUBLIC_KEY_PARSE_ERROR_REASON_UNSUPPORTED_KEY_VERSION"
             }
+            Self::MultipleCertificates => {
+                "OPEN_PGP_PUBLIC_KEY_PARSE_ERROR_REASON_MULTIPLE_CERTIFICATES"
+            }
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1601,6 +1968,9 @@ impl OpenPgpPublicKeyParseErrorReason {
             "OPEN_PGP_PUBLIC_KEY_PARSE_ERROR_REASON_MALFORMED" => Some(Self::Malformed),
             "OPEN_PGP_PUBLIC_KEY_PARSE_ERROR_REASON_UNSUPPORTED_KEY_VERSION" => {
                 Some(Self::UnsupportedKeyVersion)
+            }
+            "OPEN_PGP_PUBLIC_KEY_PARSE_ERROR_REASON_MULTIPLE_CERTIFICATES" => {
+                Some(Self::MultipleCertificates)
             }
             _ => None,
         }
@@ -1647,6 +2017,11 @@ pub enum OpenPgpVerificationWarning {
     KeyRevoked = 1,
     KeyExpired = 2,
     SignatureExpired = 3,
+    PolicyConflict = 4,
+    /// The data signature's digest algorithm is below Keyguard's verification
+    /// policy (SHA-1, MD5, RIPEMD-160). The signature is reported invalid; this
+    /// distinguishes "uses a broken digest" from "does not verify".
+    WeakDigest = 5,
 }
 impl OpenPgpVerificationWarning {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1659,6 +2034,8 @@ impl OpenPgpVerificationWarning {
             Self::KeyRevoked => "OPEN_PGP_VERIFICATION_WARNING_KEY_REVOKED",
             Self::KeyExpired => "OPEN_PGP_VERIFICATION_WARNING_KEY_EXPIRED",
             Self::SignatureExpired => "OPEN_PGP_VERIFICATION_WARNING_SIGNATURE_EXPIRED",
+            Self::PolicyConflict => "OPEN_PGP_VERIFICATION_WARNING_POLICY_CONFLICT",
+            Self::WeakDigest => "OPEN_PGP_VERIFICATION_WARNING_WEAK_DIGEST",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1670,6 +2047,169 @@ impl OpenPgpVerificationWarning {
             "OPEN_PGP_VERIFICATION_WARNING_SIGNATURE_EXPIRED" => {
                 Some(Self::SignatureExpired)
             }
+            "OPEN_PGP_VERIFICATION_WARNING_POLICY_CONFLICT" => Some(Self::PolicyConflict),
+            "OPEN_PGP_VERIFICATION_WARNING_WEAK_DIGEST" => Some(Self::WeakDigest),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpKeyComponentRole {
+    Unspecified = 0,
+    Primary = 1,
+    Subkey = 2,
+}
+impl OpenPgpKeyComponentRole {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_KEY_COMPONENT_ROLE_UNSPECIFIED",
+            Self::Primary => "OPEN_PGP_KEY_COMPONENT_ROLE_PRIMARY",
+            Self::Subkey => "OPEN_PGP_KEY_COMPONENT_ROLE_SUBKEY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_KEY_COMPONENT_ROLE_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_KEY_COMPONENT_ROLE_PRIMARY" => Some(Self::Primary),
+            "OPEN_PGP_KEY_COMPONENT_ROLE_SUBKEY" => Some(Self::Subkey),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpAgentOperation {
+    Unspecified = 0,
+    Sign = 1,
+    Decrypt = 2,
+}
+impl OpenPgpAgentOperation {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_AGENT_OPERATION_UNSPECIFIED",
+            Self::Sign => "OPEN_PGP_AGENT_OPERATION_SIGN",
+            Self::Decrypt => "OPEN_PGP_AGENT_OPERATION_DECRYPT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_AGENT_OPERATION_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_AGENT_OPERATION_SIGN" => Some(Self::Sign),
+            "OPEN_PGP_AGENT_OPERATION_DECRYPT" => Some(Self::Decrypt),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpPolicyUse {
+    Unspecified = 0,
+    SignNewData = 1,
+    EncryptNewData = 2,
+}
+impl OpenPgpPolicyUse {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_POLICY_USE_UNSPECIFIED",
+            Self::SignNewData => "OPEN_PGP_POLICY_USE_SIGN_NEW_DATA",
+            Self::EncryptNewData => "OPEN_PGP_POLICY_USE_ENCRYPT_NEW_DATA",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_POLICY_USE_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_POLICY_USE_SIGN_NEW_DATA" => Some(Self::SignNewData),
+            "OPEN_PGP_POLICY_USE_ENCRYPT_NEW_DATA" => Some(Self::EncryptNewData),
+            _ => None,
+        }
+    }
+}
+/// Effective revocation state at the metadata evaluation time. Missing or
+/// unrecognized values must not be interpreted as evidence of non-revocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpRevocationStatus {
+    Unspecified = 0,
+    NotRevoked = 1,
+    Revoked = 2,
+    Indeterminate = 3,
+}
+impl OpenPgpRevocationStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_REVOCATION_STATUS_UNSPECIFIED",
+            Self::NotRevoked => "OPEN_PGP_REVOCATION_STATUS_NOT_REVOKED",
+            Self::Revoked => "OPEN_PGP_REVOCATION_STATUS_REVOKED",
+            Self::Indeterminate => "OPEN_PGP_REVOCATION_STATUS_INDETERMINATE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_REVOCATION_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_REVOCATION_STATUS_NOT_REVOKED" => Some(Self::NotRevoked),
+            "OPEN_PGP_REVOCATION_STATUS_REVOKED" => Some(Self::Revoked),
+            "OPEN_PGP_REVOCATION_STATUS_INDETERMINATE" => Some(Self::Indeterminate),
+            _ => None,
+        }
+    }
+}
+/// Whether a component may have its own self-signatures reissued.
+///
+/// TEMPLATE_ONLY is the legacy rescue tier: the component authenticates nothing
+/// (its self-signatures are all past a hash cutoff) yet stays renewable, because
+/// the renewal is exactly what replaces those signatures with modern ones. It
+/// authorizes no other operation. NONE covers every refusal, including revoked
+/// and indeterminate components; those states are reported through their own
+/// fields and are deliberately not distinguished here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpRenewalAuthorization {
+    Unspecified = 0,
+    Authenticated = 1,
+    TemplateOnly = 2,
+    None = 3,
+}
+impl OpenPgpRenewalAuthorization {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_RENEWAL_AUTHORIZATION_UNSPECIFIED",
+            Self::Authenticated => "OPEN_PGP_RENEWAL_AUTHORIZATION_AUTHENTICATED",
+            Self::TemplateOnly => "OPEN_PGP_RENEWAL_AUTHORIZATION_TEMPLATE_ONLY",
+            Self::None => "OPEN_PGP_RENEWAL_AUTHORIZATION_NONE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_RENEWAL_AUTHORIZATION_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_RENEWAL_AUTHORIZATION_AUTHENTICATED" => Some(Self::Authenticated),
+            "OPEN_PGP_RENEWAL_AUTHORIZATION_TEMPLATE_ONLY" => Some(Self::TemplateOnly),
+            "OPEN_PGP_RENEWAL_AUTHORIZATION_NONE" => Some(Self::None),
             _ => None,
         }
     }
@@ -1680,6 +2220,7 @@ pub enum OpenPgpKeyKind {
     Unspecified = 0,
     LegacyEd25519X25519 = 1,
     Rsa = 2,
+    Ed25519X25519 = 3,
 }
 impl OpenPgpKeyKind {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1691,6 +2232,7 @@ impl OpenPgpKeyKind {
             Self::Unspecified => "OPEN_PGP_KEY_KIND_UNSPECIFIED",
             Self::LegacyEd25519X25519 => "OPEN_PGP_KEY_KIND_LEGACY_ED25519_X25519",
             Self::Rsa => "OPEN_PGP_KEY_KIND_RSA",
+            Self::Ed25519X25519 => "OPEN_PGP_KEY_KIND_ED25519_X25519",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1699,6 +2241,37 @@ impl OpenPgpKeyKind {
             "OPEN_PGP_KEY_KIND_UNSPECIFIED" => Some(Self::Unspecified),
             "OPEN_PGP_KEY_KIND_LEGACY_ED25519_X25519" => Some(Self::LegacyEd25519X25519),
             "OPEN_PGP_KEY_KIND_RSA" => Some(Self::Rsa),
+            "OPEN_PGP_KEY_KIND_ED25519_X25519" => Some(Self::Ed25519X25519),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpKeyVersion {
+    /// Older callers omit the version and continue to generate V4 certificates.
+    Unspecified = 0,
+    V4 = 4,
+    V6 = 6,
+}
+impl OpenPgpKeyVersion {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_KEY_VERSION_UNSPECIFIED",
+            Self::V4 => "OPEN_PGP_KEY_VERSION_V4",
+            Self::V6 => "OPEN_PGP_KEY_VERSION_V6",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_KEY_VERSION_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_KEY_VERSION_V4" => Some(Self::V4),
+            "OPEN_PGP_KEY_VERSION_V6" => Some(Self::V6),
             _ => None,
         }
     }
@@ -1781,6 +2354,7 @@ pub enum OpenPgpProtectionMode {
     Unspecified = 0,
     SeipdV1Mdc = 1,
     GnupgOcb = 2,
+    SeipdV2Aead = 3,
 }
 impl OpenPgpProtectionMode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1792,6 +2366,7 @@ impl OpenPgpProtectionMode {
             Self::Unspecified => "OPEN_PGP_PROTECTION_MODE_UNSPECIFIED",
             Self::SeipdV1Mdc => "OPEN_PGP_PROTECTION_MODE_SEIPD_V1_MDC",
             Self::GnupgOcb => "OPEN_PGP_PROTECTION_MODE_GNUPG_OCB",
+            Self::SeipdV2Aead => "OPEN_PGP_PROTECTION_MODE_SEIPD_V2_AEAD",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1800,6 +2375,41 @@ impl OpenPgpProtectionMode {
             "OPEN_PGP_PROTECTION_MODE_UNSPECIFIED" => Some(Self::Unspecified),
             "OPEN_PGP_PROTECTION_MODE_SEIPD_V1_MDC" => Some(Self::SeipdV1Mdc),
             "OPEN_PGP_PROTECTION_MODE_GNUPG_OCB" => Some(Self::GnupgOcb),
+            "OPEN_PGP_PROTECTION_MODE_SEIPD_V2_AEAD" => Some(Self::SeipdV2Aead),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpDecryptionWarning {
+    Unspecified = 0,
+    /// RFC 9580 Section 12.4: the message was successfully decrypted with an
+    /// RSA key smaller than 3072 bits. Historical access remains permitted, but
+    /// the key is too weak for modern use.
+    WeakRsaKey = 1,
+    /// RFC 9580 Section 12.6: the message was successfully decrypted with a
+    /// deprecated ElGamal key.
+    ElgamalKey = 2,
+}
+impl OpenPgpDecryptionWarning {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_DECRYPTION_WARNING_UNSPECIFIED",
+            Self::WeakRsaKey => "OPEN_PGP_DECRYPTION_WARNING_WEAK_RSA_KEY",
+            Self::ElgamalKey => "OPEN_PGP_DECRYPTION_WARNING_ELGAMAL_KEY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_DECRYPTION_WARNING_UNSPECIFIED" => Some(Self::Unspecified),
+            "OPEN_PGP_DECRYPTION_WARNING_WEAK_RSA_KEY" => Some(Self::WeakRsaKey),
+            "OPEN_PGP_DECRYPTION_WARNING_ELGAMAL_KEY" => Some(Self::ElgamalKey),
             _ => None,
         }
     }
@@ -1822,8 +2432,14 @@ pub enum OpenPgpExpirationUpdateErrorReason {
     InvalidExpiration = 12,
     TimeConflict = 13,
     SignatureVerificationFailed = 14,
+    /// Reserved wire value. The mutation pipeline derives its metadata directly
+    /// from the certificate it just produced, so this reason is no longer
+    /// produced; the value stays allocated for older clients.
     MetadataResolutionFailed = 15,
     InternalFailure = 16,
+    /// No signature hash satisfies both the caller's template and the signing
+    /// key's algorithm-specific digest-size floor.
+    UnsupportedSigningHash = 17,
 }
 impl OpenPgpExpirationUpdateErrorReason {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1876,6 +2492,9 @@ impl OpenPgpExpirationUpdateErrorReason {
             }
             Self::InternalFailure => {
                 "OPEN_PGP_EXPIRATION_UPDATE_ERROR_REASON_INTERNAL_FAILURE"
+            }
+            Self::UnsupportedSigningHash => {
+                "OPEN_PGP_EXPIRATION_UPDATE_ERROR_REASON_UNSUPPORTED_SIGNING_HASH"
             }
         }
     }
@@ -1932,6 +2551,535 @@ impl OpenPgpExpirationUpdateErrorReason {
             }
             "OPEN_PGP_EXPIRATION_UPDATE_ERROR_REASON_INTERNAL_FAILURE" => {
                 Some(Self::InternalFailure)
+            }
+            "OPEN_PGP_EXPIRATION_UPDATE_ERROR_REASON_UNSUPPORTED_SIGNING_HASH" => {
+                Some(Self::UnsupportedSigningHash)
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpCertificateMaterialInputErrorReason {
+    Unspecified = 0,
+    EmptyCertificate = 1,
+    MalformedCertificate = 2,
+    UnsupportedKeyVersion = 3,
+    FingerprintMismatch = 4,
+    ComponentCollision = 5,
+    ResourceLimit = 6,
+    UnsupportedTskLayout = 7,
+}
+impl OpenPgpCertificateMaterialInputErrorReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSPECIFIED"
+            }
+            Self::EmptyCertificate => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_EMPTY_CERTIFICATE"
+            }
+            Self::MalformedCertificate => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_MALFORMED_CERTIFICATE"
+            }
+            Self::UnsupportedKeyVersion => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSUPPORTED_KEY_VERSION"
+            }
+            Self::FingerprintMismatch => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_FINGERPRINT_MISMATCH"
+            }
+            Self::ComponentCollision => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_COMPONENT_COLLISION"
+            }
+            Self::ResourceLimit => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_RESOURCE_LIMIT"
+            }
+            Self::UnsupportedTskLayout => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSUPPORTED_TSK_LAYOUT"
+            }
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSPECIFIED" => {
+                Some(Self::Unspecified)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_EMPTY_CERTIFICATE" => {
+                Some(Self::EmptyCertificate)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_MALFORMED_CERTIFICATE" => {
+                Some(Self::MalformedCertificate)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSUPPORTED_KEY_VERSION" => {
+                Some(Self::UnsupportedKeyVersion)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_FINGERPRINT_MISMATCH" => {
+                Some(Self::FingerprintMismatch)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_COMPONENT_COLLISION" => {
+                Some(Self::ComponentCollision)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_RESOURCE_LIMIT" => {
+                Some(Self::ResourceLimit)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_INPUT_ERROR_REASON_UNSUPPORTED_TSK_LAYOUT" => {
+                Some(Self::UnsupportedTskLayout)
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpCertificateMaterialPairErrorReason {
+    Unspecified = 0,
+    MissingMaterial = 1,
+    FingerprintMismatch = 3,
+    ComponentCollision = 4,
+    ResourceLimit = 5,
+    InvalidRebuiltOutput = 6,
+    ConflictingSecretMaterial = 7,
+}
+impl OpenPgpCertificateMaterialPairErrorReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_UNSPECIFIED"
+            }
+            Self::MissingMaterial => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_MISSING_MATERIAL"
+            }
+            Self::FingerprintMismatch => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_FINGERPRINT_MISMATCH"
+            }
+            Self::ComponentCollision => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_COMPONENT_COLLISION"
+            }
+            Self::ResourceLimit => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_RESOURCE_LIMIT"
+            }
+            Self::InvalidRebuiltOutput => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_INVALID_REBUILT_OUTPUT"
+            }
+            Self::ConflictingSecretMaterial => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_CONFLICTING_SECRET_MATERIAL"
+            }
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_UNSPECIFIED" => {
+                Some(Self::Unspecified)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_MISSING_MATERIAL" => {
+                Some(Self::MissingMaterial)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_FINGERPRINT_MISMATCH" => {
+                Some(Self::FingerprintMismatch)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_COMPONENT_COLLISION" => {
+                Some(Self::ComponentCollision)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_RESOURCE_LIMIT" => {
+                Some(Self::ResourceLimit)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_INVALID_REBUILT_OUTPUT" => {
+                Some(Self::InvalidRebuiltOutput)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_PAIR_ERROR_REASON_CONFLICTING_SECRET_MATERIAL" => {
+                Some(Self::ConflictingSecretMaterial)
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpCertificateMaterialWithheldReason {
+    Unspecified = 0,
+    NoTransferablePublicCertificate = 1,
+    LocalPublicEvidence = 2,
+    SecretMaterialNotTransferable = 3,
+}
+impl OpenPgpCertificateMaterialWithheldReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_UNSPECIFIED"
+            }
+            Self::NoTransferablePublicCertificate => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_NO_TRANSFERABLE_PUBLIC_CERTIFICATE"
+            }
+            Self::LocalPublicEvidence => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_LOCAL_PUBLIC_EVIDENCE"
+            }
+            Self::SecretMaterialNotTransferable => {
+                "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_SECRET_MATERIAL_NOT_TRANSFERABLE"
+            }
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_UNSPECIFIED" => {
+                Some(Self::Unspecified)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_NO_TRANSFERABLE_PUBLIC_CERTIFICATE" => {
+                Some(Self::NoTransferablePublicCertificate)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_LOCAL_PUBLIC_EVIDENCE" => {
+                Some(Self::LocalPublicEvidence)
+            }
+            "OPEN_PGP_CERTIFICATE_MATERIAL_WITHHELD_REASON_SECRET_MATERIAL_NOT_TRANSFERABLE" => {
+                Some(Self::SecretMaterialNotTransferable)
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpUserIdRevocationErrorReason {
+    Unspecified = 0,
+    EmptyPrivateKey = 1,
+    MalformedKey = 2,
+    FingerprintMismatch = 3,
+    TargetNotFound = 4,
+    LastUserId = 5,
+    UnsupportedKeyVersion = 6,
+    ProtectedSecretKey = 7,
+    MissingSelfSignature = 8,
+    NonRevocable = 9,
+    TimeConflict = 10,
+    SignatureVerificationFailed = 11,
+    /// Reserved wire value. The mutation pipeline derives its metadata directly
+    /// from the certificate it just produced, so this reason is no longer
+    /// produced; the value stays allocated for older clients.
+    MetadataResolutionFailed = 12,
+    InternalFailure = 13,
+    CertificateRevoked = 14,
+    UnresolvedRevocationAuthority = 15,
+    /// No signature hash satisfies both the caller's template and the signing
+    /// key's algorithm-specific digest-size floor.
+    UnsupportedSigningHash = 16,
+}
+impl OpenPgpUserIdRevocationErrorReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSPECIFIED",
+            Self::EmptyPrivateKey => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_EMPTY_PRIVATE_KEY"
+            }
+            Self::MalformedKey => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_MALFORMED_KEY"
+            }
+            Self::FingerprintMismatch => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_FINGERPRINT_MISMATCH"
+            }
+            Self::TargetNotFound => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_TARGET_NOT_FOUND"
+            }
+            Self::LastUserId => "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_LAST_USER_ID",
+            Self::UnsupportedKeyVersion => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSUPPORTED_KEY_VERSION"
+            }
+            Self::ProtectedSecretKey => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_PROTECTED_SECRET_KEY"
+            }
+            Self::MissingSelfSignature => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_MISSING_SELF_SIGNATURE"
+            }
+            Self::NonRevocable => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_NON_REVOCABLE"
+            }
+            Self::TimeConflict => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_TIME_CONFLICT"
+            }
+            Self::SignatureVerificationFailed => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_SIGNATURE_VERIFICATION_FAILED"
+            }
+            Self::MetadataResolutionFailed => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_METADATA_RESOLUTION_FAILED"
+            }
+            Self::InternalFailure => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_INTERNAL_FAILURE"
+            }
+            Self::CertificateRevoked => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_CERTIFICATE_REVOKED"
+            }
+            Self::UnresolvedRevocationAuthority => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNRESOLVED_REVOCATION_AUTHORITY"
+            }
+            Self::UnsupportedSigningHash => {
+                "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSUPPORTED_SIGNING_HASH"
+            }
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSPECIFIED" => {
+                Some(Self::Unspecified)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_EMPTY_PRIVATE_KEY" => {
+                Some(Self::EmptyPrivateKey)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_MALFORMED_KEY" => {
+                Some(Self::MalformedKey)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_FINGERPRINT_MISMATCH" => {
+                Some(Self::FingerprintMismatch)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_TARGET_NOT_FOUND" => {
+                Some(Self::TargetNotFound)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_LAST_USER_ID" => {
+                Some(Self::LastUserId)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSUPPORTED_KEY_VERSION" => {
+                Some(Self::UnsupportedKeyVersion)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_PROTECTED_SECRET_KEY" => {
+                Some(Self::ProtectedSecretKey)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_MISSING_SELF_SIGNATURE" => {
+                Some(Self::MissingSelfSignature)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_NON_REVOCABLE" => {
+                Some(Self::NonRevocable)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_TIME_CONFLICT" => {
+                Some(Self::TimeConflict)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_SIGNATURE_VERIFICATION_FAILED" => {
+                Some(Self::SignatureVerificationFailed)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_METADATA_RESOLUTION_FAILED" => {
+                Some(Self::MetadataResolutionFailed)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_INTERNAL_FAILURE" => {
+                Some(Self::InternalFailure)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_CERTIFICATE_REVOKED" => {
+                Some(Self::CertificateRevoked)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNRESOLVED_REVOCATION_AUTHORITY" => {
+                Some(Self::UnresolvedRevocationAuthority)
+            }
+            "OPEN_PGP_USER_ID_REVOCATION_ERROR_REASON_UNSUPPORTED_SIGNING_HASH" => {
+                Some(Self::UnsupportedSigningHash)
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OpenPgpUserIdReplacementErrorReason {
+    Unspecified = 0,
+    EmptyPrivateKey = 1,
+    MalformedKey = 2,
+    FingerprintMismatch = 3,
+    TargetNotFound = 4,
+    TargetInactive = 5,
+    InvalidNewUserId = 6,
+    SameIdentity = 7,
+    DuplicateIdentity = 8,
+    PreviouslyRevokedIdentity = 9,
+    AmbiguousPrimary = 10,
+    UnsupportedKeyVersion = 11,
+    ProtectedSecretKey = 12,
+    MissingSelfSignature = 13,
+    NonRevocable = 14,
+    UnsupportedTemplate = 15,
+    TimeConflict = 16,
+    SignatureVerificationFailed = 17,
+    /// Reserved wire value. The mutation pipeline derives its metadata directly
+    /// from the certificate it just produced, so this reason is no longer
+    /// produced; the value stays allocated for older clients.
+    MetadataResolutionFailed = 18,
+    InternalFailure = 19,
+    CertificateRevoked = 20,
+    UnresolvedRevocationAuthority = 21,
+    /// No signature hash satisfies both the caller's template and the signing
+    /// key's algorithm-specific digest-size floor.
+    UnsupportedSigningHash = 22,
+    /// Authenticated certificate statements do not resolve to one effective
+    /// policy. Advancing the signature clock cannot resolve this conflict.
+    PolicyConflict = 23,
+}
+impl OpenPgpUserIdReplacementErrorReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSPECIFIED",
+            Self::EmptyPrivateKey => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_EMPTY_PRIVATE_KEY"
+            }
+            Self::MalformedKey => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_MALFORMED_KEY"
+            }
+            Self::FingerprintMismatch => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_FINGERPRINT_MISMATCH"
+            }
+            Self::TargetNotFound => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TARGET_NOT_FOUND"
+            }
+            Self::TargetInactive => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TARGET_INACTIVE"
+            }
+            Self::InvalidNewUserId => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_INVALID_NEW_USER_ID"
+            }
+            Self::SameIdentity => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_SAME_IDENTITY"
+            }
+            Self::DuplicateIdentity => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_DUPLICATE_IDENTITY"
+            }
+            Self::PreviouslyRevokedIdentity => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_PREVIOUSLY_REVOKED_IDENTITY"
+            }
+            Self::AmbiguousPrimary => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_AMBIGUOUS_PRIMARY"
+            }
+            Self::UnsupportedKeyVersion => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_KEY_VERSION"
+            }
+            Self::ProtectedSecretKey => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_PROTECTED_SECRET_KEY"
+            }
+            Self::MissingSelfSignature => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_MISSING_SELF_SIGNATURE"
+            }
+            Self::NonRevocable => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_NON_REVOCABLE"
+            }
+            Self::UnsupportedTemplate => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_TEMPLATE"
+            }
+            Self::TimeConflict => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TIME_CONFLICT"
+            }
+            Self::SignatureVerificationFailed => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_SIGNATURE_VERIFICATION_FAILED"
+            }
+            Self::MetadataResolutionFailed => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_METADATA_RESOLUTION_FAILED"
+            }
+            Self::InternalFailure => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_INTERNAL_FAILURE"
+            }
+            Self::CertificateRevoked => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_CERTIFICATE_REVOKED"
+            }
+            Self::UnresolvedRevocationAuthority => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNRESOLVED_REVOCATION_AUTHORITY"
+            }
+            Self::UnsupportedSigningHash => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_SIGNING_HASH"
+            }
+            Self::PolicyConflict => {
+                "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_POLICY_CONFLICT"
+            }
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSPECIFIED" => {
+                Some(Self::Unspecified)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_EMPTY_PRIVATE_KEY" => {
+                Some(Self::EmptyPrivateKey)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_MALFORMED_KEY" => {
+                Some(Self::MalformedKey)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_FINGERPRINT_MISMATCH" => {
+                Some(Self::FingerprintMismatch)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TARGET_NOT_FOUND" => {
+                Some(Self::TargetNotFound)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TARGET_INACTIVE" => {
+                Some(Self::TargetInactive)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_INVALID_NEW_USER_ID" => {
+                Some(Self::InvalidNewUserId)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_SAME_IDENTITY" => {
+                Some(Self::SameIdentity)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_DUPLICATE_IDENTITY" => {
+                Some(Self::DuplicateIdentity)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_PREVIOUSLY_REVOKED_IDENTITY" => {
+                Some(Self::PreviouslyRevokedIdentity)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_AMBIGUOUS_PRIMARY" => {
+                Some(Self::AmbiguousPrimary)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_KEY_VERSION" => {
+                Some(Self::UnsupportedKeyVersion)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_PROTECTED_SECRET_KEY" => {
+                Some(Self::ProtectedSecretKey)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_MISSING_SELF_SIGNATURE" => {
+                Some(Self::MissingSelfSignature)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_NON_REVOCABLE" => {
+                Some(Self::NonRevocable)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_TEMPLATE" => {
+                Some(Self::UnsupportedTemplate)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_TIME_CONFLICT" => {
+                Some(Self::TimeConflict)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_SIGNATURE_VERIFICATION_FAILED" => {
+                Some(Self::SignatureVerificationFailed)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_METADATA_RESOLUTION_FAILED" => {
+                Some(Self::MetadataResolutionFailed)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_INTERNAL_FAILURE" => {
+                Some(Self::InternalFailure)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_CERTIFICATE_REVOKED" => {
+                Some(Self::CertificateRevoked)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNRESOLVED_REVOCATION_AUTHORITY" => {
+                Some(Self::UnresolvedRevocationAuthority)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_UNSUPPORTED_SIGNING_HASH" => {
+                Some(Self::UnsupportedSigningHash)
+            }
+            "OPEN_PGP_USER_ID_REPLACEMENT_ERROR_REASON_POLICY_CONFLICT" => {
+                Some(Self::PolicyConflict)
             }
             _ => None,
         }

@@ -19,12 +19,11 @@ fetched from a keyserver (`keys.openpgp.org` by default).
 
 ## Desktop (Linux, macOS & Windows)
 
-1. Enable the **GPG agent** in Keyguard's GPG settings, and make sure the
-   vault holds a GPG key the agent is allowed to use. Keyguard starts its agent
-   on the native endpoint that GnuPG resolves for a home directory it manages:
-   - **Linux** — `$XDG_RUNTIME_DIR/keyguard-gpg-agent` (or
-     `/tmp/keyguard-$(id -u)/gnupg` if `XDG_RUNTIME_DIR` is unset); **Flatpak** — `~/.var/app/com.artemchep.keyguard/data/gnupg`;
-   - **macOS** — `~/Library/Group Containers/com.artemchep.keyguard/gnupg`;
+1. Enable the **GPG agent** in Keyguard's GPG settings, and make sure the vault holds a GPG key the agent is allowed to use. The integration uses a dedicated `GNUPGHOME` directory:
+   - **Linux** — `$XDG_DATA_HOME/keyguard/gnupg` (or
+     `~/.local/share/keyguard/gnupg` if `XDG_DATA_HOME` is unset, empty, or relative); **Flatpak** —
+     `~/.var/app/com.artemchep.keyguard/data/gnupg`;
+   - **macOS** — `~/.keyguard/gnupg`;
    - **Windows** — `%LOCALAPPDATA%\ArtemChepurnyi\keyguard\gnupg`.
 
    > **Windows requires native GnuPG.** The GPG executable bundled with Git for
@@ -37,7 +36,18 @@ fetched from a keyserver (`keys.openpgp.org` by default).
    your shell profile:
 
    ```sh
-   export GNUPGHOME="$XDG_RUNTIME_DIR/keyguard-gpg-agent"
+   case "${XDG_DATA_HOME:-}" in
+     /*) GNUPGHOME="$XDG_DATA_HOME/keyguard/gnupg" ;;
+     *) GNUPGHOME="$HOME/.local/share/keyguard/gnupg" ;;
+   esac
+   GNUPGHOME="$(printf '%s' "$GNUPGHOME" | tr -s '/')"
+   export GNUPGHOME
+   ```
+
+   On macOS:
+
+   ```sh
+   export GNUPGHOME="$HOME/.keyguard/gnupg"
    ```
 
    For the Flatpak build, use the persistent app data directory instead:
@@ -52,11 +62,15 @@ fetched from a keyserver (`keys.openpgp.org` by default).
    $env:GNUPGHOME = "$env:LOCALAPPDATA\ArtemChepurnyi\keyguard\gnupg"
    ```
 
-   Keyguard speaks the standard gpg-agent protocol on the socket reported by
-   `gpgconf --homedir "$GNUPGHOME" --list-dirs agent-socket`, so any `gpg`
-   command run with this `GNUPGHOME` reaches your vault's keys. Native Windows
-   GnuPG resolves a marker-file endpoint backed by a loopback connection;
-   Keyguard publishes that endpoint automatically.
+   Keyguard supports the standard gpg-agent protocol on the separate endpoint
+   reported by `gpgconf --homedir "$GNUPGHOME" --list-dirs agent-socket`.
+   Because GnuPG may locate that endpoint in a per-user runtime directory,
+   the native macOS setup script queries `gpgconf` and links the endpoint to
+   Keyguard. Other desktop builds query `gpgconf` at startup and report an
+   error if it cannot resolve an absolute endpoint or prepare its directory.
+   Native Windows GnuPG resolves a marker-file
+   endpoint backed by a loopback connection; Keyguard publishes that endpoint
+   automatically.
 3. Export the public key from the **GPG key** item and import it into this
    home — only public key material leaves the vault:
 
@@ -96,10 +110,16 @@ git config --local gpg.format openpgp
 git config --local gpg.program gpg
 ```
 
-Then commit with that home in the environment:
+Then commit from a shell where `GNUPGHOME` is exported as in step 2:
 
 ```sh
-GNUPGHOME="$XDG_RUNTIME_DIR/keyguard-gpg-agent" git commit -S
+git commit -S
+```
+
+On macOS:
+
+```sh
+GNUPGHOME="$HOME/.keyguard/gnupg" git commit -S
 ```
 
 For the Flatpak build:
@@ -142,9 +162,8 @@ public keys, sign or verify data, and encrypt or decrypt it. The calling app nev
 Apps known to include integrations for this API include
 [Thunderbird for Android and K-9 Mail](https://github.com/thunderbird/thunderbird-android/tree/main/plugins/openpgp-api-lib)
 and [FairEmail](https://github.com/M66B/FairEmail/tree/master/openpgp-api).
-These are compatibility examples rather than a guarantee for every app version;
-the client must let you choose an OpenPGP provider instead of requiring the
-OpenKeychain app specifically.
+Compatibility varies across app versions. The client application must
+support selecting a custom OpenPGP provider.
 
 ## Desktop approval scopes
 
@@ -168,8 +187,10 @@ the connection and process scopes usually ask again even in the same terminal
 tab or pane.
 
 The terminal columns describe Linux and macOS when native identity evidence is
-available. On Windows, every option currently behaves like **Per
-connection**.
+available. If Keyguard cannot verify the caller, including requests restricted
+by the native macOS sandbox, approval reuse falls back to **Per connection**.
+
+On Windows the approval-scope setting is not supported.
 
 ## Reviewing activity
 

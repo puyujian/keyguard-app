@@ -1,8 +1,5 @@
 package com.artemchep.keyguard.di
 
-import com.artemchep.keyguard.common.service.backup.BackupRepository
-import com.artemchep.keyguard.common.service.backup.BackupRepositoryZipImpl
-import com.artemchep.keyguard.common.service.backup.BackupRunService
 import com.artemchep.keyguard.common.service.crypto.FileEncryptionCodec
 import com.artemchep.keyguard.common.service.crypto.GpgKeyExpirationService
 import com.artemchep.keyguard.common.service.crypto.GpgKeyGenerator
@@ -12,19 +9,17 @@ import com.artemchep.keyguard.common.service.crypto.GpgOpenPgpVerifier
 import com.artemchep.keyguard.common.service.database.DatabaseDispatcher
 import com.artemchep.keyguard.common.service.execute.ExecuteCommand
 import com.artemchep.keyguard.common.service.execute.impl.ExecuteCommandJvm
-import com.artemchep.keyguard.common.service.gpmprivapps.PrivilegedAppListEntity
+import com.artemchep.keyguard.common.service.keyvalue.KeyValueStoreFactory
 import com.artemchep.keyguard.common.service.licensekey.EcdsaP256LicenseSignatureVerifier
 import com.artemchep.keyguard.common.service.licensekey.LicenseSignatureVerifier
 import com.artemchep.keyguard.common.service.logging.LogRepository
 import com.artemchep.keyguard.common.service.sshagent.SshAgentApprovalWindowMemory
 import com.artemchep.keyguard.common.service.text.Base32Service
 import com.artemchep.keyguard.common.service.text.Base64Service
-import com.artemchep.keyguard.common.service.zip.ZipService
 import com.artemchep.keyguard.common.usecase.CheckWebDavConnection
 import com.artemchep.keyguard.common.usecase.DateFormatter
 import com.artemchep.keyguard.common.usecase.GetAppBuildDate
 import com.artemchep.keyguard.common.usecase.GetAppBuildRef
-import com.artemchep.keyguard.common.usecase.GetPasswordStrength
 import com.artemchep.keyguard.common.usecase.GetSshAgentApprovalCachePolicy
 import com.artemchep.keyguard.common.usecase.GetSshAgentApprovalWindow
 import com.artemchep.keyguard.common.usecase.GetVaultSession
@@ -39,15 +34,9 @@ import com.artemchep.keyguard.common.usecase.impl.TestBackupLocationImpl
 import com.artemchep.keyguard.copy.Base32ServiceJvm
 import com.artemchep.keyguard.copy.Base64ServiceJvm
 import com.artemchep.keyguard.copy.DateFormatterJvm
-import com.artemchep.keyguard.copy.GetAppBuildDateImpl
-import com.artemchep.keyguard.copy.GetAppBuildRefImpl
-import com.artemchep.keyguard.copy.GetPasswordStrengthJvm
+import com.artemchep.keyguard.common.usecase.impl.GetAppBuildDateImpl
+import com.artemchep.keyguard.common.usecase.impl.GetAppBuildRefImpl
 import com.artemchep.keyguard.copy.NumberFormatterJvm
-import com.artemchep.keyguard.copy.ZipServiceJvm
-import com.artemchep.keyguard.core.store.bitwarden.BitwardenCipher
-import com.artemchep.keyguard.core.store.bitwarden.BitwardenToken
-import com.artemchep.keyguard.core.store.bitwarden.KeePassToken
-import com.artemchep.keyguard.core.store.bitwarden.ServiceToken
 import com.artemchep.keyguard.crypto.FileEncryptionCodecJvm
 import com.artemchep.keyguard.crypto.NativeGpgKeyExpirationService
 import com.artemchep.keyguard.crypto.NativeGpgKeyGenerator
@@ -71,246 +60,192 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.http.ContentType
 import io.ktor.serialization.kotlinx.KotlinxSerializationConverter
+import kotlin.time.Duration
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.modules.polymorphic
-import kotlinx.serialization.modules.subclass
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
-import org.kodein.di.DI
-import org.kodein.di.bindProvider
-import org.kodein.di.bindSingleton
-import org.kodein.di.instance
-import kotlin.time.Duration
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
+import org.koin.dsl.onClose
 
-fun globalModuleJvm() = DI.Module(
-    name = "globalModuleJvm",
-) {
-    import(globalModuleCommon())
+class GlobalModuleJvm {
+    val module = module {
 
-    bindProvider<CoroutineDispatcher>(tag = DatabaseDispatcher) {
-        Dispatchers.IO
-    }
-    bindSingleton<SshAgentApprovalWindowMemory> {
-        SshAgentApprovalWindowMemory(
-            getSshAgentApprovalWindow = instance<GetSshAgentApprovalWindow>(),
-            getVaultSession = instance<GetVaultSession>(),
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-            getSshAgentApprovalCachePolicy = instance<GetSshAgentApprovalCachePolicy>(),
-        )
-    }
-    bindSingleton<LicenseSignatureVerifier> {
-        EcdsaP256LicenseSignatureVerifier()
-    }
-    bindSingleton<Base64Service> {
-        Base64ServiceJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<Base32Service> {
-        Base32ServiceJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<GetAppBuildDate> {
-        GetAppBuildDateImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<GetAppBuildRef> {
-        GetAppBuildRefImpl(
-            directDI = this,
-        )
-    }
-    // Repositories
-    bindSingleton<Json> {
-        Json {
-            ignoreUnknownKeys = true
-            coerceInputValues = true
-            prettyPrint = false
-            isLenient = true
-            serializersModule = SerializersModule {
-                // default
-                polymorphic(BitwardenCipher.Attachment::class) {
-                    subclass(BitwardenCipher.Attachment.Remote::class)
-                    subclass(BitwardenCipher.Attachment.Local::class)
-                    defaultDeserializer { BitwardenCipher.Attachment.Remote.serializer() }
+        factory<CoroutineDispatcher>(qualifier = named<DatabaseDispatcher>()) {
+            Dispatchers.IO
+        }
+        single<CoroutineScope>(qualifier = named<ApplicationCoroutineScope>()) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        } onClose { scope ->
+            scope?.cancel()
+        }
+        single<SshAgentApprovalWindowMemory> {
+            SshAgentApprovalWindowMemory(
+                getSshAgentApprovalWindow = get<GetSshAgentApprovalWindow>(),
+                getVaultSession = get<GetVaultSession>(),
+                scope = get<CoroutineScope>(qualifier = named<ApplicationCoroutineScope>()),
+                getSshAgentApprovalCachePolicy = get<GetSshAgentApprovalCachePolicy>(),
+            )
+        }
+        single<LicenseSignatureVerifier> {
+            EcdsaP256LicenseSignatureVerifier()
+        }
+        single<Base64Service> {
+            Base64ServiceJvm()
+        }
+        single<Base32Service> {
+            Base32ServiceJvm()
+        }
+        single<GetAppBuildDate> {
+            GetAppBuildDateImpl(
+                formatter = get(),
+            )
+        }
+        single<GetAppBuildRef> {
+            GetAppBuildRefImpl()
+        }
+        // Repositories
+        single<FileEncryptionCodec> {
+            FileEncryptionCodecJvm(cryptoGenerator = get(), stagingSpoolFactory = get())
+        }
+        single<EncryptedFilePendingUploadService> {
+            EncryptedFilePendingUploadServiceJvm(
+                dirProvider = get(),
+                fileService = get(),
+                fileEncryptionCodec = get(),
+                stagingSpoolFactory = get(),
+            )
+        }
+        single<ExecuteCommand> {
+            ExecuteCommandJvm()
+        }
+        single<RunBackupNow> {
+            RunBackupNowImpl(
+                backupRunService = get(),
+            )
+        }
+        single<CheckWebDavConnection> {
+            CheckWebDavConnectionImpl(
+                clientFactory = get(),
+            )
+        }
+        single<ListWebDavDirectory> {
+            ListWebDavDirectoryImpl(
+                clientFactory = get(),
+            )
+        }
+        single<TestBackupLocation> {
+            TestBackupLocationImpl(
+                backupObjectStoreFactory = get(),
+            )
+        }
+        single<DateFormatter> {
+            DateFormatterJvm(
+                context = get(),
+            )
+        }
+        single<NumberFormatter> {
+            NumberFormatterJvm()
+        }
+        single<GpgKeyGenerator> {
+            NativeGpgKeyGenerator
+        }
+        single<GpgKeyExpirationService> {
+            NativeGpgKeyExpirationService
+        }
+        single<GpgKeyImportService> {
+            NativeGpgKeyImportService
+        }
+        single<GpgOpenPgpService> {
+            NativeGpgOpenPgpService(
+                stagingSpoolFactory = get(),
+            )
+        }
+        single<GpgOpenPgpVerifier> {
+            NativeGpgOpenPgpVerifier
+        }
+        single<HttpClient> {
+            val json: Json = get()
+            val okHttpClient: OkHttpClient = get()
+            HttpClient(OkHttp) {
+                install(UserAgent) {
+                    agent = BitwardenPersona.of(CurrentPlatform)
+                        .userAgent
                 }
-                // database
-                polymorphic(ServiceToken::class) {
-                    subclass(BitwardenToken::class)
-                    subclass(KeePassToken::class)
-                    defaultDeserializer { BitwardenToken.serializer() }
+                engine {
+                    preconfigured = okHttpClient
                 }
-                // privileged apps
-                polymorphic(PrivilegedAppListEntity.App::class) {
-                    subclass(PrivilegedAppListEntity.App.AndroidApp::class)
-                    subclass(PrivilegedAppListEntity.App.Unknown::class)
-                    defaultDeserializer { PrivilegedAppListEntity.App.Unknown.serializer() }
+    //            install(Logging) {
+    //                level = if (isRelease) LogLevel.INFO else LogLevel.ALL
+    //            }
+                install(ContentNegotiation) {
+                    register(ContentType.Application.Json, KotlinxSerializationConverter(json))
+                }
+                install(WebSockets) {
+                    pingIntervalMillis = 20_000
+                }
+                install(HttpCache) {
+                    // In memory.
+                }
+                install(HttpRequestRetry) {
+                    configureBitwardenHttpRetry()
                 }
             }
         }
-    }
-    bindSingleton<FileEncryptionCodec> {
-        FileEncryptionCodecJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<EncryptedFilePendingUploadService> {
-        EncryptedFilePendingUploadServiceJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<ExecuteCommand> {
-        ExecuteCommandJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<BackupRepository> {
-        BackupRepositoryZipImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<BackupRunService> {
-        BackupRunService(
-            directDI = this,
-        )
-    }
-    bindSingleton<RunBackupNow> {
-        RunBackupNowImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<CheckWebDavConnection> {
-        CheckWebDavConnectionImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<ListWebDavDirectory> {
-        ListWebDavDirectoryImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<TestBackupLocation> {
-        TestBackupLocationImpl(
-            directDI = this,
-        )
-    }
-    bindSingleton<ZipService> {
-        ZipServiceJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<GetPasswordStrength> {
-        GetPasswordStrengthJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<DateFormatter> {
-        DateFormatterJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<NumberFormatter> {
-        NumberFormatterJvm(
-            directDI = this,
-        )
-    }
-    bindSingleton<GpgKeyGenerator> {
-        NativeGpgKeyGenerator
-    }
-    bindSingleton<GpgKeyExpirationService> {
-        NativeGpgKeyExpirationService
-    }
-    bindSingleton<GpgKeyImportService> {
-        NativeGpgKeyImportService
-    }
-    bindSingleton<GpgOpenPgpService> {
-        NativeGpgOpenPgpService(this)
-    }
-    bindSingleton<GpgOpenPgpVerifier> {
-        NativeGpgOpenPgpVerifier
-    }
-    bindSingleton<HttpClient> {
-        val json: Json = instance()
-        val okHttpClient: OkHttpClient = instance()
-        HttpClient(OkHttp) {
-            install(UserAgent) {
-                agent = BitwardenPersona.of(CurrentPlatform)
-                    .userAgent
-            }
-            engine {
-                preconfigured = okHttpClient
-            }
-//            install(Logging) {
-//                level = if (isRelease) LogLevel.INFO else LogLevel.ALL
-//            }
-            install(ContentNegotiation) {
-                register(ContentType.Application.Json, KotlinxSerializationConverter(json))
-            }
-            install(WebSockets) {
-                pingIntervalMillis = 20_000
-            }
-            install(HttpCache) {
-                // In memory.
-            }
-            install(HttpRequestRetry) {
-                configureBitwardenHttpRetry()
+        single<HttpClient>(qualifier = named("curl")) {
+            val json: Json = get()
+            val okHttpClient: OkHttpClient = get()
+            HttpClient(OkHttp) {
+                CurlUserAgent()
+                engine {
+                    preconfigured = okHttpClient
+                }
+    //            install(Logging) {
+    //                level = if (isRelease) LogLevel.INFO else LogLevel.ALL
+    //            }
+                install(ContentNegotiation) {
+                    register(ContentType.Application.Json, KotlinxSerializationConverter(json))
+                }
+                install(WebSockets) {
+                    pingIntervalMillis = 20_000
+                }
+                install(HttpCache) {
+                    // In memory.
+                }
+                install(HttpRequestRetry) {
+                    configureBitwardenHttpRetry()
+                }
             }
         }
-    }
-    bindSingleton<HttpClient>(tag = "curl") {
-        val json: Json = instance()
-        val okHttpClient: OkHttpClient = instance()
-        HttpClient(OkHttp) {
-            CurlUserAgent()
-            engine {
-                preconfigured = okHttpClient
-            }
-//            install(Logging) {
-//                level = if (isRelease) LogLevel.INFO else LogLevel.ALL
-//            }
-            install(ContentNegotiation) {
-                register(ContentType.Application.Json, KotlinxSerializationConverter(json))
-            }
-            install(WebSockets) {
-                pingIntervalMillis = 20_000
-            }
-            install(HttpCache) {
-                // In memory.
-            }
-            install(HttpRequestRetry) {
-                configureBitwardenHttpRetry()
-            }
-        }
-    }
-    bindSingleton<OkHttpClient> {
-        val timeouts = with(Duration) { 30.seconds }
-        OkHttpClient
-            .Builder()
-            .installPlatformTrustManager()
-            .connectTimeout(timeouts)
-            .readTimeout(timeouts)
-            .writeTimeout(timeouts)
-            .apply {
-                if (!isRelease) {
-                    val logRepository: LogRepository = instance()
-                    val logger = HttpLoggingInterceptor.Logger { message ->
-//                        logRepository.post(
-//                            tag = "OkHttp",
-//                            message = message,
-//                        )
+        single<OkHttpClient> {
+            val timeouts = with(Duration) { 30.seconds }
+            OkHttpClient
+                .Builder()
+                .installPlatformTrustManager()
+                .connectTimeout(timeouts)
+                .readTimeout(timeouts)
+                .writeTimeout(timeouts)
+                .apply {
+                    if (!isRelease) {
+                        val logRepository: LogRepository = get()
+                        val logger = HttpLoggingInterceptor.Logger { message ->
+    //                        logRepository.post(
+    //                            qualifier = named("OkHttp"),
+    //                            message = message,
+    //                        )
+                        }
+                        val logging = HttpLoggingInterceptor(logger).apply {
+                            level = HttpLoggingInterceptor.Level.BODY
+                        }
+                        // addInterceptor(logging)
                     }
-                    val logging = HttpLoggingInterceptor(logger).apply {
-                        level = HttpLoggingInterceptor.Level.BODY
-                    }
-                    // addInterceptor(logging)
                 }
-            }
-            .build()
+                .build()
+        }
     }
 }
