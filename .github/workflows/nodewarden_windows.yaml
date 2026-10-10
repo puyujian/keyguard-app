@@ -88,11 +88,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'MSI native bundle verification failed.' }
           python scripts/verify_native_bundle.py desktop desktopApp/build/compose/binaries/main-release/app/Keyguard --platform windows --arch x86_64
           if ($LASTEXITCODE -ne 0) { throw 'Portable native bundle verification failed.' }
-      - name: Run extracted MSI launcher smoke
-        shell: pwsh
-        run: >-
-          python scripts/run_native_package_smoke.py
-          (Join-Path $env:RUNNER_TEMP 'keyguard-msi') --platform windows
       - name: Stage personal MSI and portable ZIP
         shell: pwsh
         run: |
@@ -105,6 +100,13 @@ jobs:
           Get-ChildItem personal-windows -File | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content -Encoding ascii personal-windows/SHA256SUMS.txt
+      - name: Verify delivered portable ZIP and extracted launcher
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'keyguard-portable-final'
+          Expand-Archive -LiteralPath personal-windows/Keyguard-Nodewarden-Windows11-x64-portable.zip -DestinationPath $target
+          python scripts/verify_native_bundle.py desktop $target --platform windows --arch x86_64
+          if ($LASTEXITCODE -ne 0) { throw 'Delivered portable ZIP verification failed.' }
       - name: Upload personal Windows packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -120,5 +122,6 @@ jobs:
           path: |
             common/build/test-results/desktopTest/
             ${{ runner.temp }}/keyguard-msi.log
+            desktopApp/build/compose/logs/**/*.txt
           if-no-files-found: ignore
           retention-days: 30
