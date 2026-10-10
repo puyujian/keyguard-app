@@ -1,0 +1,124 @@
+name: Nodewarden Windows 11 x64
+
+on:
+  push:
+    branches: [build/nodewarden-windows11]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nodewarden-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          lfs: true
+          submodules: recursive
+          persist-credentials: false
+      - name: Setup JetBrains Runtime
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654
+        with:
+          distribution: jetbrains
+          java-version: '21'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@f29f5a9d7b09a7c6b29859002d29d24e1674c884
+        with:
+          cache-read-only: false
+      - uses: ./.github/actions/setup_rust
+        with:
+          targets: x86_64-pc-windows-msvc
+          cache-key: desktop
+      - uses: ./.github/actions/prefetch_native
+        with:
+          profile: desktop
+      - uses: ./.github/actions/setup_protobuf
+      - name: Prepare personal build
+        shell: pwsh
+        run: |
+          Add-Content gradle.properties ""
+          Add-Content gradle.properties "versionRef=$(git rev-parse --short HEAD)"
+          Add-Content gradle.properties "buildkonfig.flavor=release"
+          Add-Content gradle.properties "kotlin.compiler.execution.strategy=in-process"
+          Add-Content gradle.properties "org.gradle.workers.max=2"
+      - uses: ./.github/actions/build_desktop_licenses
+      - name: Shared PRF persistence regressions on Windows
+        shell: pwsh
+        run: >-
+          ./gradlew :common:desktopTest
+          --tests "com.artemchep.keyguard.feature.home.vault.add.AddStateProducerPasskeyTest"
+          --tests "com.artemchep.keyguard.common.service.export.impl.JsonExportServiceImplTest"
+          --tests "com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.codec.KeePassPasskeyPrfTest"
+          --tests "com.artemchep.keyguard.provider.bitwarden.entity.LoginFido2CredentialsEntityTest"
+          --tests "com.artemchep.keyguard.provider.bitwarden.entity.api.LoginFido2CredentialsRequestTest"
+          --tests "com.artemchep.keyguard.provider.bitwarden.crypto.CipherCryptoUriSignatureTest"
+          --tests "com.artemchep.keyguard.provider.bitwarden.crypto.CipherDecoderTest"
+          "-Pkeyguard.nativeCargo.cargoOffline=true"
+      - name: Build minified Windows app image
+        shell: pwsh
+        run: >-
+          ./gradlew :desktopApp:createReleaseDistributable
+          "-Pkeyguard.nativeCargo.cargoOffline=true"
+      - name: Build x64 MSI
+        shell: pwsh
+        run: >-
+          ./gradlew :desktopApp:packageReleaseMsi
+          -x :desktopApp:createReleaseDistributable
+          "-Pkeyguard.nativeCargo.cargoOffline=true"
+      - name: Verify MSI architecture and version; extract MSI
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path gradle/libs.versions.toml -Pattern '^appVersionName = "([^"]+)"').Matches[0].Groups[1].Value
+          ./scripts/verify_windows_msi.ps1 `
+            -Directory desktopApp/build/compose/binaries/main-release/msi `
+            -Version $version -Architecture x86_64 `
+            -ExtractDirectory (Join-Path $env:RUNNER_TEMP 'keyguard-msi')
+      - name: Verify packaged native bundle
+        shell: pwsh
+        run: |
+          python scripts/verify_native_bundle.py desktop (Join-Path $env:RUNNER_TEMP 'keyguard-msi') --platform windows --arch x86_64
+          if ($LASTEXITCODE -ne 0) { throw 'MSI native bundle verification failed.' }
+          python scripts/verify_native_bundle.py desktop desktopApp/build/compose/binaries/main-release/app/Keyguard --platform windows --arch x86_64
+          if ($LASTEXITCODE -ne 0) { throw 'Portable native bundle verification failed.' }
+      - name: Run extracted MSI launcher smoke
+        shell: pwsh
+        run: >-
+          python scripts/run_native_package_smoke.py
+          (Join-Path $env:RUNNER_TEMP 'keyguard-msi') --platform windows
+      - name: Stage personal MSI and portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force personal-windows | Out-Null
+          $packages = @(Get-ChildItem desktopApp/build/compose/binaries/main-release/msi/*.msi)
+          if ($packages.Count -ne 1) { throw 'Expected exactly one MSI.' }
+          Copy-Item $packages[0].FullName personal-windows/Keyguard-Nodewarden-Windows11-x64.msi
+          Compress-Archive -Path desktopApp/build/compose/binaries/main-release/app/Keyguard `
+            -DestinationPath personal-windows/Keyguard-Nodewarden-Windows11-x64-portable.zip
+          Get-ChildItem personal-windows -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content -Encoding ascii personal-windows/SHA256SUMS.txt
+      - name: Upload personal Windows packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nodewarden-windows11-x64
+          path: personal-windows/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload test reports and MSI extraction logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nodewarden-windows11-tests
+          path: |
+            common/build/test-results/desktopTest/
+            ${{ runner.temp }}/keyguard-msi.log
+          if-no-files-found: ignore
+          retention-days: 30
