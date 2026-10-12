@@ -52,12 +52,12 @@ internal fun registrationResponseJson(
 }
 
 internal fun assertionResponseJson(
-    clientDataJson: String,
+    clientDataJson: String?,
     authenticatorData: String,
     signature: String,
     userHandle: String?,
 ): JsonObject = buildJsonObject {
-    put("clientDataJSON", clientDataJson)
+    clientDataJson?.let { put("clientDataJSON", it) }
     put("authenticatorData", authenticatorData)
     put("signature", signature)
     userHandle

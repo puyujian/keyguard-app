@@ -194,6 +194,7 @@ class WebAuthnAuthenticatorTest {
         val body = Json.parseToJsonElement(fixture.assertion(credential(counter = 7), clientHash)).jsonObject
         val response = body.getValue("response").jsonObject
         val authData = response.decodeBytes("authenticatorData")
+        assertFalse("clientDataJSON" in response)
         assertEquals(37, authData.size)
         assertEquals(0x1d, authData[32].toInt())
         assertContentEquals(byteArrayOf(0, 0, 0, 7), authData.copyOfRange(33, 37))

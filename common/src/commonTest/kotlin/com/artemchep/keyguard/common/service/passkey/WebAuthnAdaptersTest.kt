@@ -4,6 +4,7 @@ import com.artemchep.keyguard.common.model.DSecret
 import com.artemchep.keyguard.test.createSecret
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.time.Instant
 
 class WebAuthnAdaptersTest {
@@ -30,6 +31,8 @@ class WebAuthnAdaptersTest {
         assertEquals(source.userHandle, stored.userHandle)
         assertEquals(source.counter, stored.counter)
         assertEquals(source.discoverable, stored.discoverable)
+        // Non-PRF providers can use the shared registration adapter without a secret.
+        assertNull(stored.prfSecret)
     }
 
     private fun cipher(

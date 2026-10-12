@@ -27,6 +27,7 @@ data class ItemLoginFido2CredentialsExportEntity(
     val keyAlgorithm: String,
     val keyCurve: String,
     val keyValue: String,
+    val prfSecret: String? = null,
     val rpId: String,
     val rpName: String?,
     val counter: String,

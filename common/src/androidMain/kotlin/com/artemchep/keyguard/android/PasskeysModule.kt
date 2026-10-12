@@ -41,6 +41,7 @@ class PasskeysModule {
                 json = get(),
                 passkeyUtils = get(),
                 authenticator = get(),
+                base64Service = get(),
             )
         }
         single {
@@ -63,6 +64,7 @@ class PasskeysModule {
                 json = get(),
                 authenticator = get(),
                 passkeyUtils = get(),
+                base64Service = get(),
             )
         }
         single {

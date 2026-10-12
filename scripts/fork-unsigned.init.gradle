@@ -1,0 +1,16 @@
+// This fork produces an unsigned, minified release for private offline signing.
+// Keep upstream signing and Firebase configuration unchanged for normal builds.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.extensions.getByName('androidComponents').finalizeDsl { android ->
+            android.buildTypes.getByName('release').signingConfig = null
+        }
+    }
+    project.tasks.configureEach { task ->
+        if (task.name.endsWith('GoogleServices') ||
+            task.name.startsWith('uploadCrashlytics') ||
+            task.name.startsWith('injectCrashlytics')) {
+            task.enabled = false
+        }
+    }
+}

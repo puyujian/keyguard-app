@@ -282,6 +282,7 @@ class JsonExportServiceImpl(
                         keyAlgorithm = credential.keyAlgorithm,
                         keyCurve = credential.keyCurve,
                         keyValue = credential.keyValue,
+                        prfSecret = credential.prfSecret,
                         rpId = credential.rpId,
                         rpName = credential.rpName,
                         counter = credential.counter?.toString()

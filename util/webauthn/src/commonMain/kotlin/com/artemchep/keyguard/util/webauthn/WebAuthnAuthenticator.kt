@@ -124,7 +124,10 @@ class WebAuthnAuthenticator(
         )
         return try {
             val response = assertionResponseJson(
-                clientDataJson = PasskeyBase64.encodeToString(clientData),
+                // A browser-supplied hash signs its original client data. Credential Manager
+                // must restore that data; emitting locally assembled JSON would invalidate
+                // the signature when the relying party hashes the response.
+                clientDataJson = if (clientDataHash == null) PasskeyBase64.encodeToString(clientData) else null,
                 authenticatorData = PasskeyBase64.encodeToString(result.authenticatorData),
                 signature = PasskeyBase64.encodeToString(result.signature),
                 userHandle = result.userHandle,

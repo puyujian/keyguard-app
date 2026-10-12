@@ -19,12 +19,15 @@ import kotlinx.coroutines.delay
 import java.lang.IllegalStateException
 
 class PasskeyUtils(
-    cryptoService: CryptoGenerator,
+    private val cryptoService: CryptoGenerator,
     privilegedAppsService: PrivilegedAppsService,
     tldService: TldService,
     httpClient: HttpClient,
 ) {
     companion object {
+        // WebAuthn PRF 规定的上下文标签，末尾必须包含一个零字节。
+        internal val PRF_LABEL = "WebAuthn PRF\u0000".toByteArray(Charsets.UTF_8)
+
         /**
          * The minimum time the 'passkey is doing work' screen should
          * be shown. This is needed just to make to user interface less
@@ -175,6 +178,60 @@ class PasskeyUtils(
         rpId: String,
     ): Boolean = isValidCanonicalWebAuthnRpId(rpId)
 
+    /** 为新凭据生成独立且不可预测的 32 字节 PRF 密钥。 */
+    fun generatePrfSecret(): ByteArray = cryptoService.seed(32)
+
+    /** 使用该凭据独立保存的密钥计算 WebAuthn PRF 输出。 */
+    fun computePrf(
+        prfSecretBytes: ByteArray,
+        prfInput: ByteArray,
+    ): ByteArray = computeWebAuthnPrf(
+        cryptoService = cryptoService,
+        prfSecretBytes = prfSecretBytes,
+        prfInput = prfInput,
+    )
+
+    /** Android 二维码 Hybrid 请求已在 PC 端完成 WebAuthn PRF 输入哈希，禁止再次哈希。 */
+    fun computePrfFromHashedInput(
+        prfSecretBytes: ByteArray,
+        hashedPrfInput: ByteArray,
+    ): ByteArray = computeWebAuthnPrfFromHashedInput(
+        cryptoService = cryptoService,
+        prfSecretBytes = prfSecretBytes,
+        hashedPrfInput = hashedPrfInput,
+    )
+
     private fun getGenericServiceFailureMessage(rpId: String): String =
         "This seems to be an issue with the service provider `$rpId`. Please reach out to their support team."
+}
+
+/**
+ * 软件认证器中的 PRF 计算：先对带上下文标签的输入做 SHA-256，
+ * 再以凭据独立保存的随机密钥执行 HMAC-SHA-256。
+ */
+internal fun computeWebAuthnPrf(
+    cryptoService: CryptoGenerator,
+    prfSecretBytes: ByteArray,
+    prfInput: ByteArray,
+): ByteArray {
+    val prfSalt = cryptoService.hashSha256(PasskeyUtils.PRF_LABEL + prfInput)
+    return cryptoService.hmacSha256(
+        key = prfSecretBytes,
+        data = prfSalt,
+    )
+}
+
+/** 对 Hybrid 通道传入的 32 字节已哈希 PRF 输入直接执行凭据级 HMAC。 */
+internal fun computeWebAuthnPrfFromHashedInput(
+    cryptoService: CryptoGenerator,
+    prfSecretBytes: ByteArray,
+    hashedPrfInput: ByteArray,
+): ByteArray {
+    require(hashedPrfInput.size == 32) {
+        "Hybrid PRF input must be a 32-byte SHA-256 value."
+    }
+    return cryptoService.hmacSha256(
+        key = prfSecretBytes,
+        data = hashedPrfInput,
+    )
 }

@@ -36,6 +36,43 @@ class LoginFido2CredentialsEntityTest {
     }
 
     @Test
+    fun `an absent PRF secret decodes to null for an old credential`() {
+        val entity = json.decodeFromString<LoginFido2CredentialsEntity>(
+            credentialJson(userHandle = "null"),
+        )
+        assertNull(entity.prfSecret)
+    }
+
+    @Test
+    fun `pascal and camel cased PRF secrets both decode`() {
+        val pascal = json.decodeFromString<LoginFido2CredentialsEntity>(
+            credentialJson(
+                userHandle = "null",
+                prfSecret = "\"2.encrypted-prf-secret\"",
+            ),
+        )
+        val camel = json.decodeFromString<LoginFido2CredentialsEntity>(
+            """
+            {
+              "credentialId": "Y3JlZC1pZA",
+              "keyType": "public-key",
+              "keyAlgorithm": "ECDSA",
+              "keyCurve": "P-256",
+              "keyValue": "2.encrypted-key",
+              "prfSecret": "2.encrypted-prf-secret",
+              "rpId": "2.encrypted-rp",
+              "counter": "2.encrypted-counter",
+              "discoverable": "2.encrypted-discoverable",
+              "creationDate": "2024-01-01T00:00:00Z"
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("2.encrypted-prf-secret", pascal.prfSecret)
+        assertEquals("2.encrypted-prf-secret", camel.prfSecret)
+    }
+
+    @Test
     fun `a camel cased credential decodes`() {
         // The entity accepts both the PascalCase and camelCase spelling of every
         // member; server builds differ on which they answer with. Most members
@@ -138,12 +175,16 @@ class LoginFido2CredentialsEntityTest {
     private fun credentialJson(
         userHandle: String?,
         rpName: String? = "\"Example\"",
+        prfSecret: String? = null,
     ): String {
         val userHandleMember = userHandle
             ?.let { "\"UserHandle\": $it," }
             .orEmpty()
         val rpNameMember = rpName
             ?.let { "\"RpName\": $it," }
+            .orEmpty()
+        val prfSecretMember = prfSecret
+            ?.let { "\"PrfSecret\": $it," }
             .orEmpty()
         return """
         {
@@ -152,6 +193,7 @@ class LoginFido2CredentialsEntityTest {
           "KeyAlgorithm": "ECDSA",
           "KeyCurve": "P-256",
           "KeyValue": "a2V5",
+          $prfSecretMember
           "RpId": "example.com",
           $rpNameMember
           "Counter": "0",

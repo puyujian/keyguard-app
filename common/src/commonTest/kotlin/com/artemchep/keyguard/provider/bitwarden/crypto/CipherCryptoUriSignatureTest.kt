@@ -23,6 +23,20 @@ class CipherCryptoUriSignatureTest {
         )
     }
 
+    @Test
+    fun `PRF secret is encrypted with the credential fields`() {
+        val transformed = cipher()
+            .transform(
+                itemCrypto = prefixEncrypt,
+                globalCrypto = prefixEncrypt,
+            )
+
+        assertEquals(
+            "enc($PRF_SECRET)",
+            transformed.login?.fido2Credentials?.single()?.prfSecret,
+        )
+    }
+
     private fun cipher() = BitwardenCipher(
         accountId = "account-1",
         cipherId = "cipher-1",
@@ -43,12 +57,31 @@ class CipherCryptoUriSignatureTest {
                     ),
                 ),
             ),
+            fido2Credentials = listOf(
+                BitwardenCipher.Login.Fido2Credentials(
+                    credentialId = "credential-id",
+                    keyType = "public-key",
+                    keyAlgorithm = "ECDSA",
+                    keyCurve = "P-256",
+                    keyValue = "private-key",
+                    prfSecret = PRF_SECRET,
+                    rpId = "example.com",
+                    rpName = "Example",
+                    counter = "0",
+                    userHandle = "user-handle",
+                    userName = "alice@example.com",
+                    userDisplayName = "Alice",
+                    discoverable = "true",
+                    creationDate = TEST_INSTANT,
+                ),
+            ),
         ),
     )
 
     private companion object {
         const val FINGERPRINT =
             "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"
+        const val PRF_SECRET = "base64-prf-secret"
         val TEST_INSTANT = Instant.parse("2024-01-01T00:00:00Z")
     }
 }
