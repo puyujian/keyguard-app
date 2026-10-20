@@ -203,14 +203,6 @@ jobs:
         run: |
           echo "" >> gradle.properties
           echo "cert_identity=${{ secrets.CERT_IDENTITY }}" >> gradle.properties
-      - name: "Setup notarization config"
-        run: |
-          {
-            echo ""
-            echo "notarization_apple_id=${{ secrets.NOTARIZATION_APPLE_ID }}"
-            echo "notarization_password=${{ secrets.NOTARIZATION_PASSWD }}"
-            echo "notarization_asc_provider=${{ secrets.NOTARIZATION_ASC_PROVIDER }}"
-          } >> gradle.properties
       - name: "Build release app image"
         run: >-
           ./gradlew
@@ -221,11 +213,10 @@ jobs:
         run: |
           codesign --verify --strict --verbose=2 \
             desktopApp/build/compose/binaries/main-release/app/Keyguard.app
-      - name: "Build and notarize DMG"
+      - name: "Build DMG"
         run: >-
           ./gradlew
           :desktopApp:packageReleaseDmg
-          :desktopApp:notarizeReleaseDmg
           -x :desktopApp:createReleaseDistributable
           -Pkeyguard.nativeCargo.cargoOffline=true
       - name: "Verify final DMG native bundle"
@@ -256,7 +247,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: logs-mac-${{ matrix.arch }}
+          name: logs-mac-${{ matrix.arch }}-build-${{ github.run_attempt }}
           path: desktopApp/build/compose/logs/**/*.txt
           retention-days: 30
       - name: "Upload binaries"
@@ -264,16 +255,62 @@ jobs:
         with:
           name: binaries-mac-${{ matrix.arch }}
           path: desktopApp/build/compose/binaries/main-release/**
+          overwrite: true
           retention-days: 1
       - name: "Add a suffix to the artifacts"
         run: |
           cd desktopApp/build/compose/binaries/main-release/dmg
           for f in * ; do mv -- "$f" "$(echo "$f" | sed -nE 's/^(.*)(\..*)$/\1-${{ matrix.arch }}\2/p')" ; done
-      - name: "Upload .dmg"
+      - name: "Upload DMG for notarization"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: notarization-input-mac-${{ matrix.arch }}
+          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+  notarize-macos-app:
+    runs-on: macos-15
+    needs:
+      - build-macos-app
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [apple, intel]
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: "Download signed DMG"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: notarization-input-mac-${{ matrix.arch }}
+          path: artifacts
+      - name: "Notarize and staple DMG"
+        shell: bash
+        env:
+          NOTARIZATION_APPLE_ID: ${{ secrets.NOTARIZATION_APPLE_ID }}
+          NOTARIZATION_PASSWD: ${{ secrets.NOTARIZATION_PASSWD }}
+          NOTARIZATION_ASC_PROVIDER: ${{ secrets.NOTARIZATION_ASC_PROVIDER }}
+        run: bash .github/notarize_macos_dmg.sh artifacts notarization-logs
+      - name: "Upload notarization logs"
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: logs-mac-${{ matrix.arch }}-notarization-${{ github.run_attempt }}
+          path: notarization-logs/
+          retention-days: 30
+      - name: "Upload notarized DMG"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: app-mac-${{ matrix.arch }}
-          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          path: artifacts/*.dmg
+          if-no-files-found: error
+          overwrite: true
           retention-days: 1
   build-linux-app:
     runs-on: ${{ matrix.runner }}
@@ -885,7 +922,7 @@ jobs:
       - build-android-app
       - build-android-ssh-agent
       - build-linux-app
-      - build-macos-app
+      - notarize-macos-app
       - build-windows-app
       - check-windows-msi
     env:
@@ -1155,8 +1192,11 @@ jobs:
           git commit -m "Mirror latest Keyguard Termux packages"
           git push origin HEAD:master
   deploy-microsoft-store:
-    name: Deploy Microsoft Store
+    name: Submit Microsoft Store
     runs-on: windows-latest
+    concurrency:
+      group: microsoft-store-submission
+      cancel-in-progress: false
     needs:
       - build-windows-app
       - dist
@@ -1225,9 +1265,9 @@ jobs:
           --sellerId "${{ secrets.MSSTORE_SELLER_ID }}"
           --clientId "${{ secrets.MSSTORE_CLIENT_ID }}"
           --clientSecret "${{ secrets.MSSTORE_CLIENT_SECRET }}"
-      # The submission is left as a draft (--noCommit) so it can be reviewed
-      # in the Partner Center before it is committed. Read it back because the
-      # CLI may otherwise return success without attaching the package.
+      # Upload as a draft (--noCommit) and verify the attached package before
+      # submitting it for certification. The CLI may otherwise return success
+      # without attaching the package.
       - name: "Create and verify draft submission"
         shell: pwsh
         env:
@@ -1268,6 +1308,18 @@ jobs:
             }
             throw "The Store draft does not contain '$env:STORE_UPLOAD_NAME' as PendingUpload. Found: $observedPackages"
           }
+      - name: "Submit for certification"
+        shell: pwsh
+        env:
+          STORE_APP_ID: ${{ secrets.MSSTORE_APP_ID }}
+        run: |
+          msstore submission publish "$env:STORE_APP_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "msstore submission publish exited $LASTEXITCODE."
+          }
+
+          "## Microsoft Store submission" >> $env:GITHUB_STEP_SUMMARY
+          "The update was submitted for certification. Microsoft controls certification and publication according to the submission's publishing settings." >> $env:GITHUB_STEP_SUMMARY
   deploy-flathub:
     name: Deploy Flathub
     runs-on: ubuntu-slim
@@ -1297,23 +1349,3 @@ jobs:
           gh workflow run update-keyguard-bin.yml \
             --repo AChep/keyguard-repo-aur \
             --ref master
-  deploy:
-    name: Deploy ${{ matrix.wf-file }}
-    runs-on: ubuntu-slim
-    needs:
-      - dist
-    strategy:
-      fail-fast: false
-      matrix:
-        wf-file:
-          - new_release_deploy_fdroid.yml
-          - new_release_deploy_homebrew.yml
-          - new_release_deploy_scoop.yml
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: "Trigger Workflow"
-        uses: ./.github/actions/github_trigger_wf
-        with:
-          github-token: ${{ secrets.PERSONAL_TOKEN }}
-          github-wf-file: ${{ matrix.wf-file }}

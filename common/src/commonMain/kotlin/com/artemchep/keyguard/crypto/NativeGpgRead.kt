@@ -18,6 +18,7 @@ import com.artemchep.keyguard.common.service.crypto.GpgUserIdInfo
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentKeyMetadata
 import com.artemchep.keyguard.common.service.gpgagent.GpgAgentMetadataResolution
 import com.artemchep.keyguard.common.service.gpgagent.normalizeGpgFingerprint
+import com.artemchep.keyguard.common.util.useAndClear
 import com.artemchep.keyguard.nativecrypto.NativeCrypto
 import com.artemchep.keyguard.nativecrypto.NativeCryptoErrorCode
 import com.artemchep.keyguard.nativecrypto.NativeCryptoException
@@ -41,8 +42,14 @@ object NativeGpgPublicKeyParser : GpgPublicKeyParser {
         if (armored.isBlank()) {
             return GpgPublicKeyParseResult.Error(GpgPublicKeyParseError.Empty)
         }
-        val keyData = armored.encodeToByteArray()
-        return try {
+        return armored.encodeToByteArray().useAndClear { parse(it) }
+    }
+
+    /** Parses borrowed binary or armored bytes without changing the caller's buffer. */
+    internal fun parse(
+        keyData: ByteArray,
+    ): GpgPublicKeyParseResult =
+        try {
             when (val result = NativeCrypto.openPgp.parsePublicKeys(keyData)) {
                 is NativeOpenPgpPublicKeyParseResult.Success ->
                     GpgPublicKeyParseResult.Success(
@@ -66,10 +73,7 @@ object NativeGpgPublicKeyParser : GpgPublicKeyParser {
                 throw failure
             }
             GpgPublicKeyParseResult.Error(GpgPublicKeyParseError.Malformed)
-        } finally {
-            keyData.fill(0)
         }
-    }
 }
 
 object NativeGpgKeyMetadataResolver : GpgKeyMetadataResolver {
@@ -224,12 +228,9 @@ internal fun NativeOpenPgpPublicKeyInfo.toDomain(): GpgPublicKeyInfo = GpgPublic
     authenticated = authenticated,
     renewal = renewal.toDomain(),
     weakSelfSignatureAlgorithms = weakSelfSignatureAlgorithms,
-    userIdDetails = userIdDetails.map { value ->
-        GpgUserIdInfo(
-            identityId = value.identityId,
-            userId = value.userId,
-        )
-    },
+    userIdDetails = userIdDetails.map { it.toDomain() },
+    userIdHistory = userIdHistory.map { it.toDomain() },
+    canModifyUserIds = canModifyUserIds,
 )
 
 private fun NativeOpenPgpPublicSubKeyInfo.toDomain(): GpgPublicSubKeyInfo = GpgPublicSubKeyInfo(
@@ -278,4 +279,15 @@ internal fun NativeOpenPgpVerification.toDomain(): GpgOpenPgpVerification =
             }
         },
         signatures = signatures.map { result -> result.toDomain() },
+    )
+
+private fun com.artemchep.keyguard.nativecrypto.NativeOpenPgpUserIdInfo.toDomain(): GpgUserIdInfo =
+    GpgUserIdInfo(
+        identityId = identityId,
+        userId = userId,
+        primary = primary,
+        revoked = revoked,
+        canRevoke = canRevoke,
+        canReplace = canReplace,
+        canMakePrimary = canMakePrimary,
     )

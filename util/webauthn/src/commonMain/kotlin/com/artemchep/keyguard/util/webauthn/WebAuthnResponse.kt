@@ -55,14 +55,12 @@ internal fun assertionResponseJson(
     clientDataJson: String?,
     authenticatorData: String,
     signature: String,
-    userHandle: String?,
+    userHandle: ByteArray?,
 ): JsonObject = buildJsonObject {
     clientDataJson?.let { put("clientDataJSON", it) }
     put("authenticatorData", authenticatorData)
     put("signature", signature)
-    userHandle
-        ?.takeIf { it.isNotEmpty() }
-        ?.let { put("userHandle", it) }
+    userHandle?.let { put("userHandle", it) }
 }
 
 private fun JsonObjectBuilder.put(key: String, data: ByteArray) {

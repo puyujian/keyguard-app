@@ -61,7 +61,7 @@ use crate::openpgp::{
     format::{fingerprint_hex, hex_upper, normalize_fingerprint},
     packet::{
         MARKER_TAG, PADDING_TAG, PUBLIC_KEY_TAG, PUBLIC_SUBKEY_TAG, RawPacketError,
-        RawPacketStream, SECRET_KEY_TAG, SECRET_SUBKEY_TAG, SIGNATURE_TAG,
+        RawPacketStream, SECRET_KEY_TAG, SECRET_SUBKEY_TAG, SIGNATURE_TAG, USER_ID_TAG,
         armor::{RawPackets, key_block_include_checksum},
         dearmor_bounded, serialize_params, take_mpi,
     },
@@ -1547,12 +1547,11 @@ impl ClearVerificationSession {
         Ok(())
     }
 
-    /// Consumes one syntactically safe cleartext armor header.
+    /// Consumes one well-formed legacy `Hash` header.
     ///
-    /// `Hash` is security-relevant parser input and remains restricted to the
-    /// standard digest text names. Other headers are ignored for compatibility
-    /// with historical producers, but only after their framing is unambiguous
-    /// and seven-bit clean.
+    /// RFC 9580 §7.1 requires rejecting all other headers before the cleartext
+    /// body to avoid presenting unsigned assertions alongside a valid signature.
+    /// Hash names are validated but ignored when selecting the signature digest.
     fn accept_armor_header(&mut self) -> Result<(), OpenPgpReadError> {
         let header =
             std::str::from_utf8(&self.line).map_err(|_| OpenPgpReadError::InvalidArgument)?;
@@ -1568,19 +1567,7 @@ impl ClearVerificationSession {
             return Ok(());
         }
 
-        let (key, value) = header
-            .split_once(": ")
-            .ok_or(OpenPgpReadError::InvalidArgument)?;
-        let safe_key = !key.is_empty()
-            && !key.eq_ignore_ascii_case("Hash")
-            && key
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
-        let safe_value = !value.is_empty() && value.bytes().all(|byte| matches!(byte, b' '..=b'~'));
-        if !safe_key || !safe_value {
-            return Err(OpenPgpReadError::InvalidArgument);
-        }
-        Ok(())
+        Err(OpenPgpReadError::InvalidArgument)
     }
 
     fn accept_body_line(
@@ -2135,21 +2122,48 @@ fn public_key_info(
     } else {
         armor_public_key_packets(original_packets, include_armor_checksum)?
     };
-    let user_id_details = policy
-        .authenticated_user_ids()
-        .filter_map(|validated| {
-            let user = certificate.details.users.get(validated.index())?;
-            let value = user.id.as_str()?;
-            Some(UserIdInfo {
-                identity_id: identity_id(13, validated.packet_body()),
-                user_id: value.to_owned(),
-            })
-        })
-        .collect();
-    let user_ids = policy
+    let can_modify_user_ids = policy.authorize_user_id_addition().is_ok();
+    let primary_index = policy.primary_user_id().map(|id| id.index());
+    let mut user_id_details = Vec::new();
+    let mut user_id_history = Vec::new();
+    for (index, user) in certificate.details.users.iter().enumerate() {
+        let Some(value) = user.id.as_str() else {
+            continue;
+        };
+        let Some(identity) = policy.user_id_at(index) else {
+            continue;
+        };
+        // Retained identities are displayable only with verified self-certification
+        // evidence. A raw, unattested User ID packet is never presented as an owner.
+        if identity.revocation_exportability_template().is_none() {
+            continue;
+        }
+        let active = identity.authenticated();
+        let info = UserIdInfo {
+            identity_id: identity_id(USER_ID_TAG, user.id.id()),
+            user_id: value.to_owned(),
+            primary: primary_index == Some(index),
+            revoked: identity.revocation_status.is_revoked(),
+            can_replace: policy.authorize_user_id_replacement(index).is_ok(),
+            can_revoke: policy.can_revoke_user_id(index),
+            can_make_primary: policy.authorize_user_id_primary_selection(index).is_ok(),
+        };
+        if active {
+            user_id_details.push(info);
+        } else {
+            user_id_history.push(info);
+        }
+    }
+    let mut user_ids = policy
         .authenticated_user_ids()
         .map(|validated| String::from_utf8_lossy(validated.packet_body()).into_owned())
         .collect::<Vec<_>>();
+    // Existing consumers use the first identity as the certificate's display name.
+    // Preserve packet order among the remaining identities without rewriting packets.
+    if let Some(primary) = policy.primary_user_id() {
+        let primary = String::from_utf8_lossy(primary.packet_body());
+        user_ids.sort_by_key(|id| id != primary.as_ref());
+    }
     Some(PublicKeyInfo {
         fingerprint: fingerprint_hex(primary.key),
         keygrip: keygrip(primary.key.public_params()),
@@ -2166,6 +2180,8 @@ fn public_key_info(
         public_key_armored,
         subkeys,
         user_id_details,
+        user_id_history,
+        can_modify_user_ids,
         component_fingerprints: certificate_components(certificate)
             .map(|component| component.fingerprint_hex())
             .collect(),

@@ -1162,6 +1162,7 @@ dependencies = [
  "salsa20",
  "sec1",
  "ssh-key",
+ "syn",
  "tempfile",
  "thiserror 2.0.18",
  "twofish",
@@ -1173,7 +1174,9 @@ dependencies = [
 name = "keyguard-crypto-fuzz"
 version = "0.0.0"
 dependencies = [
+ "base64ct",
  "keyguard-crypto-core",
+ "keyguard-crypto-sensitive",
  "libfuzzer-sys",
  "prost",
 ]

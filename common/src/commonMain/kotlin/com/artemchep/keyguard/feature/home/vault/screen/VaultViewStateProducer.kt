@@ -188,6 +188,7 @@ import com.artemchep.keyguard.feature.barcodetype.BarcodeTypeRoute
 import com.artemchep.keyguard.feature.barcodetype.createBarcodeTypeHistoryKey
 import com.artemchep.keyguard.feature.confirmation.ConfirmationRouteFactory
 import com.artemchep.keyguard.feature.confirmation.elevatedaccess.createElevatedAccessVerify
+import com.artemchep.keyguard.feature.confirmation.elevatedaccess.runVerified
 import com.artemchep.keyguard.feature.crashlytics.crashlyticsTap
 import com.artemchep.keyguard.feature.emailleak.EmailLeakRoute
 import com.artemchep.keyguard.feature.favicon.FaviconUrl
@@ -244,6 +245,7 @@ import com.artemchep.keyguard.feature.navigation.state.onClick
 import com.artemchep.keyguard.feature.navigation.state.produceScreenState
 import com.artemchep.keyguard.feature.passkeys.PasskeysCredentialViewRoute
 import com.artemchep.keyguard.feature.passkeys.PasskeysCredentialViewRouteFactory
+import com.artemchep.keyguard.feature.passkeys.passkeyPickAction
 import com.artemchep.keyguard.feature.passkeys.directory.PasskeysServiceViewDialogRoute
 import com.artemchep.keyguard.feature.passwordleak.PasswordLeakRoute
 import com.artemchep.keyguard.feature.passwordmemory.PasswordMemoryRoute
@@ -942,15 +944,10 @@ suspend fun RememberStateFlowScope.vaultViewScreenStateProducer(
         reprompt: Boolean = defaultReprompt,
         block: () -> Unit,
     ) {
-        val verify = createElevatedAccessVerify(
+        createElevatedAccessVerify(
             required = reprompt,
             granted = fff,
-        )
-        if (verify != null) {
-            verify(block)
-        } else {
-            block()
-        }
+        ).runVerified(block)
     }
 
     fun onLaunchEdit(
@@ -1573,6 +1570,7 @@ suspend fun RememberStateFlowScope.vaultViewScreenStateProducer(
                         androidAppGooglePlayParser = androidAppGooglePlayParser,
                         androidAppFDroidParser = androidAppFDroidParser,
                         verify = verify,
+                        elevatedAccessGranted = fff,
                     ).toList().transformShapes(),
                 )
             }
@@ -1646,6 +1644,7 @@ private fun RememberStateFlowScope.oh(
     androidAppGooglePlayParser: AndroidAppGooglePlayParser,
     androidAppFDroidParser: AndroidAppFDroidParser,
     verify: ((() -> Unit) -> Unit)?,
+    elevatedAccessGranted: MutableStateFlow<Boolean>,
 ) = flow<VaultViewItem> {
     val cipherRelations = resolveCipherRelations(
         cipher = cipher,
@@ -2344,20 +2343,13 @@ private fun RememberStateFlowScope.oh(
             emit(loginPasskeysItem)
             fido2Credentials.forEachIndexed { index, item ->
                 val onUse = when (mode) {
-                    is AppMode.PickPasskey -> {
-                        val matches = passkeyTargetCheck(item, mode.target)
-                            .attempt()
-                            .bind()
-                            .isRight { it }
-                        if (matches) {
-                            // lambda
-                            {
-                                mode.onComplete(item)
-                            }
-                        } else {
-                            null
-                        }
-                    }
+                    is AppMode.PickPasskey -> passkeyPickAction(
+                        mode = mode,
+                        cipher = cipher,
+                        credential = item,
+                        passkeyTargetCheck = passkeyTargetCheck,
+                        granted = elevatedAccessGranted,
+                    )
 
                     else -> null
                 }
@@ -4010,6 +4002,7 @@ suspend fun RememberStateFlowScope.create(
     visibility: Visibility = Visibility(),
     badge: VaultViewItem.Value.Badge? = null,
     badge2: List<StateFlow<VaultViewItem.Value.Badge?>> = emptyList(),
+    label: String? = null,
     leading: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     verify: ((() -> Unit) -> Unit)? = null,
@@ -4122,6 +4115,7 @@ suspend fun RememberStateFlowScope.create(
         trailing = trailing,
         badge = badge,
         badge2 = badge2,
+        label = label,
         dropdown = dropdown.verify(verify),
     )
 }
@@ -4359,6 +4353,11 @@ private suspend fun RememberStateFlowScope.createGpgKeyItems(
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .distinct()
+    val gpgPrimaryUserId = parsedGpgKey
+        ?.userIdDetails
+        ?.firstOrNull { it.primary }
+        ?.userId
+        ?.trim()
 
     val effectiveGpgFingerprint = gpgFingerprint
         ?: parsedGpgKey
@@ -4627,17 +4626,21 @@ private suspend fun RememberStateFlowScope.createGpgKeyItems(
             id = "gpg.userIds.section",
             text = translate(Res.string.gpg_key_user_ids),
         )
-        items += create(
-            copy = copy,
-            cryptoGenerator = cryptoGenerator,
-            cipherLocalId = cipher.id,
-            id = "gpg.userIds",
-            accountId = accountId,
-            title = null,
-            value = gpgUserIds.joinToString(separator = "\n"),
-            maxLines = 4,
-            elevated = true,
-        )
+        val primaryLabel = translate(Res.string.gpg_user_ids_primary)
+        gpgUserIds.forEachIndexed { index, userId ->
+            items += create(
+                copy = copy,
+                cryptoGenerator = cryptoGenerator,
+                cipherLocalId = cipher.id,
+                id = "gpg.userId.$index",
+                accountId = accountId,
+                title = null,
+                value = userId,
+                label = primaryLabel.takeIf { userId == gpgPrimaryUserId },
+                maxLines = 4,
+                elevated = true,
+            )
+        }
     }
 
     return items

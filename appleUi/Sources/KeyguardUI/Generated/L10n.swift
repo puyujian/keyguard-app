@@ -741,6 +741,58 @@ public enum L10n {
     public static var attachment: String {
         String(localized: "attachment", bundle: AppLocalization.shared.bundle)
     }
+    /// attachment_archive_back
+    public static var attachmentArchiveBack: String {
+        String(localized: "attachment_archive_back", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_empty
+    public static var attachmentArchiveEmpty: String {
+        String(localized: "attachment_archive_empty", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_encrypted
+    public static var attachmentArchiveEncrypted: String {
+        String(localized: "attachment_archive_encrypted", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_entries
+    public static var attachmentArchiveErrorEntries: String {
+        String(localized: "attachment_archive_error_entries", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_export
+    public static var attachmentArchiveErrorExport: String {
+        String(localized: "attachment_archive_error_export", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_export_cleanup
+    public static var attachmentArchiveErrorExportCleanup: String {
+        String(localized: "attachment_archive_error_export_cleanup", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_export_size
+    public static func attachmentArchiveErrorExportSize(_ a1: String) -> String {
+        String(format: String(localized: "attachment_archive_error_export_size", bundle: AppLocalization.shared.bundle), a1)
+    }
+    /// attachment_archive_error_invalid
+    public static var attachmentArchiveErrorInvalid: String {
+        String(localized: "attachment_archive_error_invalid", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_password
+    public static var attachmentArchiveErrorPassword: String {
+        String(localized: "attachment_archive_error_password", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_error_unsupported
+    public static var attachmentArchiveErrorUnsupported: String {
+        String(localized: "attachment_archive_error_unsupported", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_password
+    public static var attachmentArchivePassword: String {
+        String(localized: "attachment_archive_password", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_save
+    public static var attachmentArchiveSave: String {
+        String(localized: "attachment_archive_save", bundle: AppLocalization.shared.bundle)
+    }
+    /// attachment_archive_unavailable
+    public static var attachmentArchiveUnavailable: String {
+        String(localized: "attachment_archive_unavailable", bundle: AppLocalization.shared.bundle)
+    }
     /// attachment_preview_action_copy_all
     public static var attachmentPreviewActionCopyAll: String {
         String(localized: "attachment_preview_action_copy_all", bundle: AppLocalization.shared.bundle)
@@ -2200,6 +2252,10 @@ public enum L10n {
     /// error_credential_calling_app_not_privileged_add_as_privileged_app_title
     public static var errorCredentialCallingAppNotPrivilegedAddAsPrivilegedAppTitle: String {
         String(localized: "error_credential_calling_app_not_privileged_add_as_privileged_app_title", bundle: AppLocalization.shared.bundle)
+    }
+    /// error_credential_not_stored
+    public static var errorCredentialNotStored: String {
+        String(localized: "error_credential_not_stored", bundle: AppLocalization.shared.bundle)
     }
     /// error_failed_agent_start
     public static func errorFailedAgentStart(_ a1: String) -> String {
@@ -4213,6 +4269,98 @@ public enum L10n {
     public static var gpgUserIdRevocationUnavailable: String {
         String(localized: "gpg_user_id_revocation_unavailable", bundle: AppLocalization.shared.bundle)
     }
+    /// gpg_user_ids_add
+    public static var gpgUserIdsAdd: String {
+        String(localized: "gpg_user_ids_add", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_add_message
+    public static var gpgUserIdsAddMessage: String {
+        String(localized: "gpg_user_ids_add_message", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_conflict
+    public static var gpgUserIdsConflict: String {
+        String(localized: "gpg_user_ids_conflict", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_draft_message
+    public static var gpgUserIdsDraftMessage: String {
+        String(localized: "gpg_user_ids_draft_message", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_email_optional
+    public static var gpgUserIdsEmailOptional: String {
+        String(localized: "gpg_user_ids_email_optional", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_empty
+    public static var gpgUserIdsEmpty: String {
+        String(localized: "gpg_user_ids_empty", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_exact
+    public static var gpgUserIdsExact: String {
+        String(localized: "gpg_user_ids_exact", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_failed
+    public static var gpgUserIdsFailed: String {
+        String(localized: "gpg_user_ids_failed", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_history
+    public static var gpgUserIdsHistory: String {
+        String(localized: "gpg_user_ids_history", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_inactive
+    public static var gpgUserIdsInactive: String {
+        String(localized: "gpg_user_ids_inactive", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_invalid_form
+    public static var gpgUserIdsInvalidForm: String {
+        String(localized: "gpg_user_ids_invalid_form", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_make_primary
+    public static var gpgUserIdsMakePrimary: String {
+        String(localized: "gpg_user_ids_make_primary", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_primary
+    public static var gpgUserIdsPrimary: String {
+        String(localized: "gpg_user_ids_primary", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_private_required
+    public static var gpgUserIdsPrivateRequired: String {
+        String(localized: "gpg_user_ids_private_required", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_read_only
+    public static var gpgUserIdsReadOnly: String {
+        String(localized: "gpg_user_ids_read_only", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_replace
+    public static var gpgUserIdsReplace: String {
+        String(localized: "gpg_user_ids_replace", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_replace_message
+    public static var gpgUserIdsReplaceMessage: String {
+        String(localized: "gpg_user_ids_replace_message", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_retry_at
+    public static func gpgUserIdsRetryAt(_ a1: String) -> String {
+        String(format: String(localized: "gpg_user_ids_retry_at", bundle: AppLocalization.shared.bundle), a1)
+    }
+    /// gpg_user_ids_revoke
+    public static var gpgUserIdsRevoke: String {
+        String(localized: "gpg_user_ids_revoke", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_revoke_message
+    public static var gpgUserIdsRevokeMessage: String {
+        String(localized: "gpg_user_ids_revoke_message", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_structured
+    public static var gpgUserIdsStructured: String {
+        String(localized: "gpg_user_ids_structured", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_time_conflict
+    public static var gpgUserIdsTimeConflict: String {
+        String(localized: "gpg_user_ids_time_conflict", bundle: AppLocalization.shared.bundle)
+    }
+    /// gpg_user_ids_unavailable
+    public static var gpgUserIdsUnavailable: String {
+        String(localized: "gpg_user_ids_unavailable", bundle: AppLocalization.shared.bundle)
+    }
     /// grant_permission
     public static var grantPermission: String {
         String(localized: "grant_permission", bundle: AppLocalization.shared.bundle)
@@ -5028,6 +5176,46 @@ public enum L10n {
     /// passkey_discoverable
     public static var passkeyDiscoverable: String {
         String(localized: "passkey_discoverable", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_cache_error
+    public static var passkeyProviderCacheError: String {
+        String(localized: "passkey_provider_cache_error", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_consent
+    public static var passkeyProviderConsent: String {
+        String(localized: "passkey_provider_consent", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_disabled
+    public static var passkeyProviderDisabled: String {
+        String(localized: "passkey_provider_disabled", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_enabled
+    public static var passkeyProviderEnabled: String {
+        String(localized: "passkey_provider_enabled", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_error
+    public static var passkeyProviderError: String {
+        String(localized: "passkey_provider_error", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_open_settings
+    public static var passkeyProviderOpenSettings: String {
+        String(localized: "passkey_provider_open_settings", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_unavailable
+    public static var passkeyProviderUnavailable: String {
+        String(localized: "passkey_provider_unavailable", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_unpackaged
+    public static var passkeyProviderUnpackaged: String {
+        String(localized: "passkey_provider_unpackaged", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_unregistered
+    public static var passkeyProviderUnregistered: String {
+        String(localized: "passkey_provider_unregistered", bundle: AppLocalization.shared.bundle)
+    }
+    /// passkey_provider_unsupported
+    public static var passkeyProviderUnsupported: String {
+        String(localized: "passkey_provider_unsupported", bundle: AppLocalization.shared.bundle)
     }
     /// passkey_relying_party
     public static var passkeyRelyingParty: String {
@@ -8085,6 +8273,54 @@ public enum L10n {
     public static var ssn: String {
         String(localized: "ssn", bundle: AppLocalization.shared.bundle)
     }
+    /// sso_browser_note
+    public static var ssoBrowserNote: String {
+        String(localized: "sso_browser_note", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_browser_success
+    public static var ssoBrowserSuccess: String {
+        String(localized: "sso_browser_success", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_account
+    public static var ssoErrorAccount: String {
+        String(localized: "sso_error_account", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_authentication
+    public static var ssoErrorAuthentication: String {
+        String(localized: "sso_error_authentication", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_callback
+    public static var ssoErrorCallback: String {
+        String(localized: "sso_error_callback", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_key_connector
+    public static var ssoErrorKeyConnector: String {
+        String(localized: "sso_error_key_connector", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_password
+    public static var ssoErrorPassword: String {
+        String(localized: "sso_error_password", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_ports
+    public static var ssoErrorPorts: String {
+        String(localized: "sso_error_ports", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_error_unsupported
+    public static var ssoErrorUnsupported: String {
+        String(localized: "sso_error_unsupported", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_login
+    public static var ssoLogin: String {
+        String(localized: "sso_login", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_unlock
+    public static var ssoUnlock: String {
+        String(localized: "sso_unlock", bundle: AppLocalization.shared.bundle)
+    }
+    /// sso_unlock_note
+    public static var ssoUnlockNote: String {
+        String(localized: "sso_unlock_note", bundle: AppLocalization.shared.bundle)
+    }
     /// state
     public static var state: String {
         String(localized: "state", bundle: AppLocalization.shared.bundle)
@@ -9285,6 +9521,14 @@ public enum L10n {
     public static func gpgKeyserverUploadVerifyRequestedPlural(_ count: Int) -> String {
         String(
             format: NSLocalizedString("gpg_keyserver_upload_verify_requested_plural", bundle: AppLocalization.shared.bundle, comment: ""),
+            locale: AppLocalization.shared.locale,
+            count
+        )
+    }
+    /// gpg_user_ids_count_plural (plural)
+    public static func gpgUserIdsCountPlural(_ count: Int) -> String {
+        String(
+            format: NSLocalizedString("gpg_user_ids_count_plural", bundle: AppLocalization.shared.bundle, comment: ""),
             locale: AppLocalization.shared.locale,
             count
         )
