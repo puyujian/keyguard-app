@@ -28,16 +28,11 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
           cache-key: android
+      # The root Cargo workspace covers every native graph the Android app ships
+      # (util/*, desktop*Agent, common*Agent), so no extra manifests are needed.
       - uses: ./.github/actions/prefetch_native
         with:
           profile: android
-          manifests: |
-            util/instance/rust/Cargo.toml
-            util/yubikey/rust/Cargo.toml
-            util/fido2/rust/Cargo.toml
-            desktopLibNative/src/Cargo.toml
-            desktopSshAgent/src/Cargo.toml
-            desktopGpgAgent/src/Cargo.toml
       - name: Prepare fork build
         run: |
           {
