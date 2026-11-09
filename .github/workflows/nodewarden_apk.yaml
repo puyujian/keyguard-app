@@ -17,7 +17,7 @@ concurrency:
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -41,8 +41,6 @@ jobs:
             echo ""
             echo "versionRef=$(git rev-parse --short HEAD)"
             echo buildkonfig.flavor=release
-            echo kotlin.compiler.execution.strategy=in-process
-            echo org.gradle.workers.max=2
           } >> gradle.properties
       - uses: ./.github/actions/build_android_licenses
         with:
