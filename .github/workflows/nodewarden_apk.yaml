@@ -15,9 +15,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  android:
+  # Upstream ships the WebAuthn PRF extension itself, so these are its own
+  # suites for the passkey stack rather than the fork's former duplicates.
+  # They run beside the package job: a slow or failing suite reports itself
+  # without holding back the APK this fork exists to produce.
+  regressions:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 180
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -41,12 +45,12 @@ jobs:
             echo ""
             echo "versionRef=$(git rev-parse --short HEAD)"
             echo buildkonfig.flavor=release
+            echo kotlin.compiler.execution.strategy=in-process
+            echo org.gradle.workers.max=2
           } >> gradle.properties
       - uses: ./.github/actions/build_android_licenses
         with:
           build-flavor: None
-      # Upstream ships the WebAuthn PRF extension itself, so these are its own
-      # suites for the passkey stack rather than the fork's former duplicates.
       - name: Passkey and PRF regressions
         run: |
           ./gradlew :common:testAndroidHostTest \
@@ -63,6 +67,45 @@ jobs:
           ./gradlew :common:desktopTest \
             --tests 'com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.codec.KeePassPasskeyCodecTest' \
             -Pkeyguard.nativeCargo.cargoOffline=true
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nodewarden-prf-tests
+          path: |
+            common/build/test-results/
+            util/webauthn/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup_gradle
+      - uses: ./.github/actions/setup_android_ndk
+      - uses: ./.github/actions/setup_rust
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          cache-key: android
+      - uses: ./.github/actions/prefetch_native
+        with:
+          profile: android
+      - name: Prepare fork build
+        run: |
+          {
+            echo ""
+            echo "versionRef=$(git rev-parse --short HEAD)"
+            echo buildkonfig.flavor=release
+          } >> gradle.properties
+      - uses: ./.github/actions/build_android_licenses
+        with:
+          build-flavor: None
       - name: Build unsigned release APK
         run: >-
           ./gradlew :androidApp:assembleNoneRelease
@@ -80,14 +123,4 @@ jobs:
             androidApp/build/outputs/apk/none/release/*.apk
             androidApp/build/outputs/mapping/noneRelease/mapping.txt
           if-no-files-found: error
-          retention-days: 30
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: nodewarden-prf-tests
-          path: |
-            common/build/test-results/
-            util/webauthn/build/test-results/
-          if-no-files-found: ignore
           retention-days: 30
