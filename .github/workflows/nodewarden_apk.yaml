@@ -28,7 +28,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      # The hosted runner has 16 GiB. A separate Kotlin daemon could not get its
+      # heap next to Gradle and the native toolchains, so compile in Gradle's own
+      # JVM and keep the parallel native work bounded.
       - uses: ./.github/actions/setup_gradle
+        with:
+          gradle-properties: |
+            kotlin.compiler.execution.strategy=in-process
+            org.gradle.jvmargs=-Xmx8g -Dfile.encoding=UTF-8 -XX:+ExitOnOutOfMemoryError
+            org.gradle.workers.max=2
       - uses: ./.github/actions/setup_android_ndk
       - uses: ./.github/actions/setup_rust
         with:
@@ -45,8 +53,6 @@ jobs:
             echo ""
             echo "versionRef=$(git rev-parse --short HEAD)"
             echo buildkonfig.flavor=release
-            echo kotlin.compiler.execution.strategy=in-process
-            echo org.gradle.workers.max=2
           } >> gradle.properties
       - uses: ./.github/actions/build_android_licenses
         with:
@@ -88,6 +94,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup_gradle
+        with:
+          gradle-properties: |
+            kotlin.compiler.execution.strategy=in-process
+            org.gradle.jvmargs=-Xmx8g -Dfile.encoding=UTF-8 -XX:+ExitOnOutOfMemoryError
+            org.gradle.workers.max=2
       - uses: ./.github/actions/setup_android_ndk
       - uses: ./.github/actions/setup_rust
         with:
