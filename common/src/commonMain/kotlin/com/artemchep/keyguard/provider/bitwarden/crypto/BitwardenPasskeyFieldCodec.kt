@@ -115,8 +115,11 @@ internal object BitwardenPasskeyFieldCodec {
                     ?.let(entries::get)
                     ?: return@map credential
                 credential.copy(
-                    prfSecret = entry.prfSecret,
-                    prfSecretWithoutUv = entry.prfSecretWithoutUv,
+                    // A document that carries no secret for this passkey keeps the
+                    // one the passkey itself still holds, see
+                    // [LoginFido2CredentialsEntity.legacyPrfSecret].
+                    prfSecret = entry.prfSecret ?: credential.prfSecret,
+                    prfSecretWithoutUv = entry.prfSecretWithoutUv ?: credential.prfSecretWithoutUv,
                 )
             },
             remainingFields = remaining,

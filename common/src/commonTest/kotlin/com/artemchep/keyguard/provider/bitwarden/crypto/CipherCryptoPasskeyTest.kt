@@ -55,6 +55,26 @@ class CipherCryptoPasskeyTest {
     }
 
     @Test
+    fun `a secret that the passkey still carries moves into the field`() {
+        // A vault touched by the fork's own builds keeps the secret in the
+        // passkey, and the document that upstream writes has no entry for it.
+        val legacy = cipher(passkey("cred-1", SECRET))
+            .copy(fields = listOf(userField, hidden("""{"version":1,"credentials":[]}""")))
+        val decrypted = legacy.transform(identityDecrypt, identityDecrypt)
+        assertEquals(listOf(SECRET), decrypted.login?.fido2Credentials?.map { it.prfSecret })
+
+        val encrypted = decrypted.transform(identityEncrypt, identityEncrypt)
+        assertEquals(listOf(null), encrypted.login?.fido2Credentials?.map { it.prfSecret })
+        assertEquals(
+            listOf(
+                userField,
+                hidden("""{"version":1,"credentials":[{"credentialId":"cred-1","prfSecret":"$SECRET"}]}"""),
+            ),
+            encrypted.fields,
+        )
+    }
+
+    @Test
     fun `new secrets replace the old field`() {
         val stale = BitwardenCipher.Field(
             name = FIELD_NAME,

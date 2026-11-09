@@ -127,6 +127,7 @@ fun BitwardenCipher.Companion.encrypted(
                                 userDisplayName = it.userDisplayName,
                                 discoverable = it.discoverable,
                                 creationDate = it.creationDate,
+                                prfSecret = it.legacyPrfSecret,
                             )
                         },
                 )

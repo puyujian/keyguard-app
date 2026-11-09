@@ -47,6 +47,14 @@ data class LoginFido2CredentialsEntity(
     @JsonNames("discoverable")
     @SerialName("Discoverable")
     val discoverable: String,
+    /**
+     * The PRF secret as the fork's own builds stored it, in the passkey itself.
+     * Upstream keeps it in [BitwardenPasskeyFieldCodec]'s hidden field instead,
+     * so this reads the old value once and the next save migrates it.
+     */
+    @JsonNames("prfSecret")
+    @SerialName("PrfSecret")
+    val legacyPrfSecret: String? = null,
     @JsonNames("creationDate")
     @SerialName("CreationDate")
     val creationDate: Instant,

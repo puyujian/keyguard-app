@@ -64,6 +64,35 @@ class BitwardenPasskeyFieldCodecTest {
     }
 
     @Test
+    fun `a passkey that still carries its own secret keeps it and moves it into the field`() {
+        // Builds before the transport field stored the secret in the passkey itself.
+        val legacy = passkey("cred-1").copy(prfSecret = "c2VjcmV0")
+        val decoded = assertNotNull(
+            BitwardenPasskeyFieldCodec.decode(
+                fields = listOf(hidden(FIELD_NAME, """{"version":1,"credentials":[]}""")),
+                credentials = listOf(legacy),
+            ),
+        )
+        assertEquals(listOf("c2VjcmV0"), decoded.credentials.map { it.prfSecret })
+        assertEquals(
+            listOf(hidden(FIELD_NAME, document)),
+            BitwardenPasskeyFieldCodec.encode(listOf(secrets("cred-1", "c2VjcmV0")), fields = emptyList()),
+        )
+    }
+
+    @Test
+    fun `the transport field wins over the secret that the passkey carries`() {
+        val legacy = passkey("cred-1").copy(prfSecret = "b2xk")
+        val decoded = assertNotNull(
+            BitwardenPasskeyFieldCodec.decode(
+                fields = listOf(hidden(FIELD_NAME, document)),
+                credentials = listOf(legacy),
+            ),
+        )
+        assertEquals(listOf("c2VjcmV0"), decoded.credentials.map { it.prfSecret })
+    }
+
+    @Test
     fun `passkeys without secrets or a credential ID write no fields`() {
         assertTrue(BitwardenPasskeyFieldCodec.encode(emptyList(), fields = emptyList()).isEmpty())
         assertTrue(

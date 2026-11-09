@@ -1,9 +1,11 @@
 package com.artemchep.keyguard.util.webauthn
 
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PasskeyBase64Test {
     @Test
@@ -13,6 +15,17 @@ class PasskeyBase64Test {
             assertContentEquals(expected, PasskeyBase64.decodeStoredKeyOrNull(encoded))
         }
         assertNull(PasskeyBase64.decodeStoredKeyOrNull("%%%"))
+    }
+
+    @Test
+    fun `a PRF secret written as standard base64 keeps its bytes`() {
+        // Builds before the transport field encoded the secret with the app-wide
+        // Base64 encoder, whose alphabet uses '+' and '/' and padding.
+        val secret = ByteArray(32) { 0xfb.toByte() }
+        val standard = Base64.Default.encode(secret)
+        assertTrue('+' in standard, standard)
+        assertContentEquals(secret, PasskeyBase64.decodePrfSecretOrNull(standard))
+        assertContentEquals(secret, PasskeyBase64.decodePrfSecretOrNull(PasskeyBase64.encodeToString(secret)))
     }
 
     @Test

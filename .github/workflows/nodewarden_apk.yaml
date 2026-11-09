@@ -66,9 +66,11 @@ jobs:
             --tests 'com.artemchep.keyguard.common.service.credentialexchange.CxfPasskeyPrfTest' \
             --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.CipherCryptoPasskeyTest' \
             --tests 'com.artemchep.keyguard.provider.bitwarden.crypto.BitwardenPasskeyFieldCodecTest' \
+            --tests 'com.artemchep.keyguard.provider.bitwarden.entity.LoginFido2CredentialsEntityTest' \
             -Pkeyguard.nativeCargo.cargoOffline=true
           ./gradlew :util:webauthn:testAndroidHostTest \
             --tests 'com.artemchep.keyguard.util.webauthn.WebAuthnAuthenticatorTest' \
+            --tests 'com.artemchep.keyguard.util.webauthn.PasskeyBase64Test' \
             -Pkeyguard.nativeCargo.cargoOffline=true
           ./gradlew :common:desktopTest \
             --tests 'com.artemchep.keyguard.provider.bitwarden.sync.v2.keepass.codec.KeePassPasskeyCodecTest' \
